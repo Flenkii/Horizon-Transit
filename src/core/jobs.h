@@ -89,6 +89,9 @@ typedef struct {
     int german;                      /* the texts' language */
     int countdown;                   /* boarding seconds, 0 = none */
     char countdown_label[64];
+    int sign_limit;                  /* the speed-limit sign while a passenger rides (in the shown unit), 0 = none */
+    int sign_over;                   /* too fast now */
+    char sign_unit[8];               /* "km/h" / "mph" */
 } TsHud;
 
 typedef struct {
@@ -99,6 +102,7 @@ typedef struct {
     int bus_needs_bus;    /* bus lines only in the game's bus (PG_BUS_14) */
     int extras_off;       /* 0.4 switch: no reputation effect on pay and requests, no special rides, no wishes */
     unsigned upgrades;    /* bought in the shop (saved): 1 << TS_SHOP_ */
+    int imperial;         /* the game shows mph and miles (its Units option, or its language's): set by the glue */
     /* the phone's Settings tab: the glue fills the rows (its own settings) and acts on a press */
     char setting_label[TS_SETTING_ROWS][40], setting_value[TS_SETTING_ROWS][24];
     int setting_count;
@@ -236,6 +240,10 @@ const char *ts_rep_name(const TsCore *c);
 const char *ts_group_name(int group, int german);
 /* the company owns this from the shop */
 int ts_has(const TsCore *c, int item);
+
+/* speeds as the game shows them: km/h, or mph rounded to 5 (75 mph for 120 km/h) */
+int ts_speed_shown(const TsCore *c, int kmh);
+const char *ts_speed_unit(const TsCore *c);
 
 /* helpers shared with the glue */
 float ts_distance_xz(const float a[3], const float b[3]);

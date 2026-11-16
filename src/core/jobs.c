@@ -76,8 +76,22 @@ void chat(TsCore *c, int style, const char *text, int force) {
     c->events[c->event_count - 1].style = style;
 }
 
+int ts_speed_shown(const TsCore *c, int kmh) {
+    if (!c->imperial) return kmh;
+    int mph = (int)((float)kmh / 1.609344f / 5.0f + 0.5f) * 5;
+    return mph < 5 ? 5 : mph;
+}
+
+const char *ts_speed_unit(const TsCore *c) {
+    return c->imperial ? "mph" : "km/h";
+}
+
+int unit_kmh(const TsCore *c, int kmh) {
+    return c->imperial ? (int)((float)ts_speed_shown(c, kmh) * 1.609344f + 0.5f) : kmh;
+}
+
 int ride_max_kmh(const TsCore *c) {
-    return c->mode == TS_BUS ? TS_BUS_MAX_KMH : c->job.max_kmh > 0 ? c->job.max_kmh : 120;
+    return unit_kmh(c, c->mode == TS_BUS ? TS_BUS_MAX_KMH : c->job.max_kmh > 0 ? c->job.max_kmh : 120);
 }
 
 /* a line of this kind (lines.c), never the same one twice in a row; {car} and {max} filled in */
@@ -92,7 +106,7 @@ void say(TsCore *c, int style, int kind, int force) {
     const char *line = c->german ? set->lines[pick].de : set->lines[pick].en;
     char text[TS_TEXT], number[16];
     size_t n = 0;
-    snprintf(number, sizeof(number), "%d", ride_max_kmh(c));
+    snprintf(number, sizeof(number), "%d", ts_speed_shown(c, ride_max_kmh(c)));
     char ride_no[16];
     int p = c->job.passenger;
     snprintf(ride_no, sizeof(ride_no), "%d", (p >= 0 && p < TS_PEOPLE_MAX ? c->met[p] : 0) + 1);
@@ -103,7 +117,7 @@ void say(TsCore *c, int style, int kind, int force) {
         if (car->make[0]) snprintf(lastcar, sizeof(lastcar), "%s %s", car->make, car->model);
         else snprintf(lastcar, sizeof(lastcar), "%s", car->model);
     } else snprintf(lastcar, sizeof(lastcar), "%s", T(c, "Auto", "car"));
-    snprintf(limit, sizeof(limit), "%d", c->wish_limit);
+    snprintf(limit, sizeof(limit), "%d", ts_speed_shown(c, c->wish_limit));
     const char *place = c->wish_place >= 0 && c->wish_place < (int)ts_place_count ? ts_places[c->wish_place].name : "";
     while (*line && n + 1 < sizeof(text)) {
         const char *fill = NULL;
@@ -116,6 +130,10 @@ void say(TsCore *c, int style, int kind, int force) {
         else if (!strncmp(line, "{place}", 7)) fill = place, line += 7;
         if (fill) {
             while (*fill && n + 1 < sizeof(text)) text[n++] = *fill++;
+            if ((fill == number || fill == limit) && c->imperial && !strncmp(line, " km/h", 5)) { /* the lines say km/h */
+                for (const char *u = " mph"; *u && n + 1 < sizeof(text); ++u) text[n++] = *u;
+                line += 5;
+            }
             continue;
         }
         text[n++] = *line++;
@@ -180,6 +198,12 @@ static void clear_nav(TsCore *c) {
 }
 
 void format_km(const TsCore *c, char *out, size_t size, float metres) {
+    if (c->imperial) { /* like the game in mph: feet up to a tenth of a mile, then miles */
+        float miles = metres / 1609.344f;
+        if (miles < 0.1f) snprintf(out, size, "%d ft", (int)(metres * 3.28084f / 10.0f + 0.5f) * 10);
+        else snprintf(out, size, "%.1f mi", miles);
+        return;
+    }
     if (metres < 1000.0f) snprintf(out, size, "%d m", (int)(metres / 10.0f + 0.5f) * 10);
     else {
         snprintf(out, size, "%.1f km", metres / 1000.0f);
@@ -1010,9 +1034,15 @@ void ts_hud(const TsCore *c, TsHud *h) {
         }
         /* the speed the passengers are happy with; it says so when it's over */
         int max = ride_max_kmh(c);
-        if (c->car_ok && c->speed * 3.6f > (float)max + 2.0f)
-            snprintf(h->chip2, sizeof(h->chip2), "%s %d", T(c, "Zu schnell! Max", "Too fast! Max"), max);
-        else snprintf(h->chip2, sizeof(h->chip2), "Max %d km/h", max);
+        int over = c->car_ok && c->speed * 3.6f > (float)max + 2.0f;
+        if (over) snprintf(h->chip2, sizeof(h->chip2), "%s %d", T(c, "Zu schnell! Max", "Too fast! Max"), ts_speed_shown(c, max));
+        else snprintf(h->chip2, sizeof(h->chip2), "Max %d %s", ts_speed_shown(c, max), ts_speed_unit(c));
+        int carrying = (c->mode == TS_UBER && c->stage >= TS_UBER_TO_DEST) || (c->mode == TS_BUS && c->onboard > 0);
+        if (carrying) {
+            h->sign_limit = ts_speed_shown(c, max);
+            h->sign_over = over;
+            snprintf(h->sign_unit, sizeof(h->sign_unit), "%s", ts_speed_unit(c));
+        }
         double left = 0.0;
         int timed = 0;
         if (c->mode == TS_UBER) {
@@ -1084,7 +1114,7 @@ void ts_hud(const TsCore *c, TsHud *h) {
                 snprintf(b, sizeof(b), "%s · %d €", km, o->pay);
                 row(h, ts_places[o->dest].name, b, 0);
                 snprintf(a, sizeof(a), "%s · %s", ts_passenger_name(o->passenger), type_name(c, o->ptype));
-                snprintf(b, sizeof(b), "max %d km/h", o->max_kmh);
+                snprintf(b, sizeof(b), "max %d %s", ts_speed_shown(c, o->max_kmh), ts_speed_unit(c));
                 row(h, a, b, 2);
             }
             if (!c->offer_count) row(h, T(c, "Keine Anfragen", "No requests"), T(c, "erst losfahren", "drive first"), 2);
@@ -1111,9 +1141,9 @@ void ts_hud(const TsCore *c, TsHud *h) {
             if (locked)
                 snprintf(h->footer, sizeof(h->footer), "%s", T(c, "Steig in den Bus (PG Bus) um, dann geht's los.", "Get into the bus (PG Bus) to drive a line."));
             else
-                snprintf(h->footer, sizeof(h->footer), "%s: %s · %s %d min · max %d km/h", T(c, "Start", "Start"),
+                snprintf(h->footer, sizeof(h->footer), "%s: %s · %s %d min · max %d %s", T(c, "Start", "Start"),
                          ts_places[l->stops[0]].name, T(c, "ca.", "about"), (int)(tt_line_minutes(c, sel < (int)ts_line_count ? sel : 0) + 0.5f),
-                         TS_BUS_MAX_KMH);
+                         ts_speed_shown(c, TS_BUS_MAX_KMH), ts_speed_unit(c));
         } else if (c->phone_tab == TS_TAB_SETTINGS) {
             for (int i = 0; i < c->setting_count && i < TS_SETTING_ROWS; ++i) row(h, c->setting_label[i], c->setting_value[i], 0);
             if (!c->setting_count) row(h, T(c, "Keine Einstellungen", "No settings"), "", 2);
@@ -1154,7 +1184,7 @@ void ts_hud(const TsCore *c, TsHud *h) {
             else snprintf(b, sizeof(b), "%s %d min", T(c, "ca.", "about"), (int)(tt_line_minutes(c, c->line) + 0.5f));
             row(h, T(c, "Fahrplan", "Timetable"), b, 0);
         }
-        snprintf(b, sizeof(b), "%d km/h", ride_max_kmh(c));
+        snprintf(b, sizeof(b), "%d %s", ts_speed_shown(c, ride_max_kmh(c)), ts_speed_unit(c));
         row(h, T(c, "Tempo höchstens", "Speed at most"), b, 0);
         snprintf(b, sizeof(b), "%d%% (%d/5)", (int)(c->sat + 0.5f), ts_stars(c->sat));
         row(h, T(c, "Zufriedenheit", "Satisfaction"), b, 0);

@@ -357,3 +357,48 @@ void ts_phone_finish(int theme, float scale, TsPhoneCanvas *cv) {
         }
     }
 }
+
+/* ------------------------------------------------------------------ the speed-limit sign */
+
+#define SG_D 86.0f /* the disc, in units */
+#define SG_M 7.0f  /* shadow margin */
+
+void ts_sign_size(float scale, int *w, int *h) {
+    *w = *h = (int)ceilf((SG_D + 2 * SG_M) * scale);
+}
+
+void ts_sign_draw(int number, const char *unit, int flash, float scale, TsPhoneCanvas *cv) {
+    Ctx c = {cv, scale, &themes[0]};
+    float x = SG_M, y = SG_M, r = SG_D / 2;
+    fill(&c, x, y, SG_D, SG_D, r, 0xD71920);                                              /* the red ring */
+    fill(&c, x + 10, y + 10, SG_D - 20, SG_D - 20, r - 10, flash ? 0xFFD21F : 0xFFFFFF);  /* the disc */
+    char n[16];
+    snprintf(n, sizeof(n), "%d", number);
+    float size = number >= 100 ? 27.0f : 33.0f;
+    int has_unit = unit && unit[0];
+    text(&c, n, x, y + (has_unit ? 17 : 22), SG_D, 40, size, 700, 0x111111, TS_TEXT_CENTER);
+    if (has_unit) text(&c, unit, x, y + 53, SG_D, 14, 10.5f, 700, 0x333333, TS_TEXT_CENTER);
+}
+
+void ts_sign_finish(float scale, TsPhoneCanvas *cv) {
+    float s = scale, cx = (SG_M + SG_D / 2) * s, cy = cx, r = SG_D / 2 * s, spread = SG_M * s;
+    for (int py = 0; py < cv->h; ++py)
+        for (int px = 0; px < cv->w; ++px) {
+            uint32_t *d = &cv->px[py * cv->w + px];
+            float dx = px + 0.5f - cx, dy = py + 0.5f - cy - 1.5f * s, dist = sqrtf(dx * dx + dy * dy);
+            float cov = clampf(r - sqrtf((px + 0.5f - cx) * (px + 0.5f - cx) + (py + 0.5f - cy) * (py + 0.5f - cy)) + 0.5f, 0, 1);
+            float sh = dist - r < spread ? 0.4f * (1.0f - clampf((dist - r) / spread, 0, 1)) : 0.0f;
+            float a = cov + (1.0f - cov) * sh;
+            int ai = (int)(a * 255.0f + 0.5f);
+            if (ai <= 0) {
+                *d = 0;
+                continue;
+            }
+            uint32_t rgb = *d & 0xFFFFFF;
+            if (ai < 255) {
+                uint32_t rr = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255, m = (uint32_t)ai;
+                rgb = (rr > m ? m : rr) << 16 | (g > m ? m : g) << 8 | (b > m ? m : b);
+            }
+            *d = (uint32_t)ai << 24 | rgb;
+        }
+}

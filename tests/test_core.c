@@ -818,6 +818,84 @@ static void test_phone_draw(void) {
     for (int t = 0; t < TS_THEMES; ++t) draw_one(&h, t, "job_de");
 }
 
+/* an English game shows miles: the limit in mph (rounded to 5), the chip, the sign and the distances */
+void format_km(const TsCore *c, char *out, size_t size, float metres);
+static void sign_one(int number, const char *unit, int flash, const char *name) {
+    int w, hh;
+    ts_sign_size(1.0f, &w, &hh);
+    uint32_t *px = calloc((size_t)w * hh, 4);
+    const char *dir = getenv("PHONE_PREVIEW");
+    char path[512];
+    TextLog log = {0};
+    log.w = w, log.h = hh;
+    if (dir) {
+        snprintf(path, sizeof(path), "%s/%s_0.json", dir, name);
+        log.json = fopen(path, "w");
+        if (log.json) fprintf(log.json, "{\"w\":%d,\"h\":%d,\"texts\":[\n", w, hh);
+    }
+    TsPhoneCanvas cv = {px, w, hh, record_text, NULL, &log};
+    ts_sign_draw(number, unit, flash, 1.0f, &cv);
+    ts_sign_finish(1.0f, &cv);
+    CHECK(log.count >= 1 && log.outside == 0, "%s: %d texts, %d outside", name, log.count, log.outside);
+    CHECK((px[0] >> 24) == 0, "%s: corner clear", name);
+    uint32_t mid = px[(hh / 2) * w + w / 2];
+    CHECK((mid >> 24) == 255, "%s: disc opaque", name);
+    int bad = 0;
+    for (int i = 0; i < w * hh; ++i) {
+        uint32_t a = px[i] >> 24, r = (px[i] >> 16) & 255, g = (px[i] >> 8) & 255, b = px[i] & 255;
+        bad += r > a || g > a || b > a;
+    }
+    CHECK(bad == 0, "%s: %d pixels not premultiplied", name, bad);
+    if (log.json) {
+        fprintf(log.json, "]}\n");
+        fclose(log.json);
+        snprintf(path, sizeof(path), "%s/%s_0.bgra", dir, name);
+        FILE *f = fopen(path, "wb");
+        if (f) fwrite(px, 4, (size_t)w * hh, f), fclose(f);
+    }
+    free(px);
+}
+
+static void test_imperial_and_sign(void) {
+    TsCore c;
+    ts_init(&c, 4u, 0);
+    CHECK(ts_speed_shown(&c, 120) == 120 && !strcmp(ts_speed_unit(&c), "km/h"), "metric stays km/h");
+    c.imperial = 1;
+    CHECK(ts_speed_shown(&c, 120) == 75 && ts_speed_shown(&c, 50) == 30 && ts_speed_shown(&c, 80) == 50,
+          "mph: %d %d %d", ts_speed_shown(&c, 120), ts_speed_shown(&c, 50), ts_speed_shown(&c, 80));
+    CHECK(!strcmp(ts_speed_unit(&c), "mph"), "unit mph");
+    char d[32];
+    format_km(&c, d, sizeof(d), 3218.7f);
+    CHECK(strstr(d, "mi") != NULL && strstr(d, "km") == NULL, "distance in miles: %s", d);
+    format_km(&c, d, sizeof(d), 50.0f);
+    CHECK(strstr(d, "ft") != NULL, "short distance in feet: %s", d);
+    place_car(ts_places[0].pos);
+    wait_s(&c, 0.3f, 0);
+    ts_phone_toggle(&c);
+    ts_phone_accept(&c);
+    CHECK(c.mode == TS_UBER, "ride taken (imperial)");
+    TsHud h;
+    ts_hud(&c, &h);
+    int lim = ts_speed_shown(&c, c.job.max_kmh);
+    char want[32];
+    snprintf(want, sizeof(want), "Max %d mph", lim);
+    CHECK(!strcmp(h.chip2, want), "imperial chip: %s", h.chip2);
+    CHECK(strstr(h.chip2, "km/h") == NULL, "no km/h in the chip");
+    CHECK(h.sign_limit == 0, "no sign before the passenger is aboard");
+    c.stage = TS_UBER_TO_DEST;
+    ts_hud(&c, &h);
+    CHECK(h.sign_limit == lim && !strcmp(h.sign_unit, "mph") && !h.sign_over, "sign %d %s %d", h.sign_limit, h.sign_unit, h.sign_over);
+    /* the sign's limit is the shown mph value: over it (in km/h of that value) counts as too fast */
+    car.vel[0] = ((float)lim * 1.609344f + 15.0f) / 3.6f;
+    ts_car_sample(&c, DT, &car);
+    ts_hud(&c, &h);
+    CHECK(h.sign_over, "sign flashes when too fast");
+    car.vel[0] = 0.0f;
+    sign_one(lim, "mph", 0, "sign_mph");
+    sign_one(120, "km/h", 0, "sign_kmh");
+    sign_one(lim, "mph", 1, "sign_over");
+}
+
 int main(int argc, char **argv) {
     (void)argv;
     int verbose = argc > 1;
@@ -844,6 +922,7 @@ int main(int argc, char **argv) {
     test_bus_sql();
     test_shop_and_settings();
     test_phone_draw();
+    test_imperial_and_sign();
     printf("%d checks, %d failures\n", checks, failures);
     return failures != 0;
 }

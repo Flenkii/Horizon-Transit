@@ -38,4 +38,10 @@ void ts_phone_finish(int theme, float scale, TsPhoneCanvas *cv);
 
 const char *ts_theme_name(int theme, int german);
 
+/* The speed-limit sign (white disc, red ring, the number) shown at the top left while a passenger rides.
+   `unit` ("km/h" / "mph") goes small under the number; `flash` = the passenger thinks it's too fast (yellow). */
+void ts_sign_size(float scale, int *w, int *h);
+void ts_sign_draw(int number, const char *unit, int flash, float scale, TsPhoneCanvas *cv);
+void ts_sign_finish(float scale, TsPhoneCanvas *cv); /* after the texts: premultiplied alpha, a soft shadow */
+
 #endif

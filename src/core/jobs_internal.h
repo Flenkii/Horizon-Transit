@@ -16,7 +16,8 @@ void toast(TsCore *c, int icon, int sound, const char *title, const char *text);
 void sound(TsCore *c, int which);
 void chat(TsCore *c, int style, const char *text, int force);
 void say(TsCore *c, int style, int kind, int force); /* a line of this kind (lines.c), tokens filled in */
-int ride_max_kmh(const TsCore *c);
+int ride_max_kmh(const TsCore *c);   /* the passenger's limit, as enforced (in mph it is the round mph value) */
+int unit_kmh(const TsCore *c, int kmh); /* km/h of the value shown for kmh (rounded to 5 mph when in mph) */
 void set_nav(TsCore *c, const float at[3]);
 void format_km(const TsCore *c, char *out, size_t size, float metres);
 void format_time(char *out, size_t size, double seconds);

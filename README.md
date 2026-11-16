@@ -5,7 +5,7 @@
 A ride-hailing and bus-line mod for **Forza Horizon 2 on PC**: take Uber-style rides and drive bus lines with virtual passengers who talk, remember you and rate your driving. Everything runs from a phone on the left of the screen (**F9**).
 One mod, one file (`TransportSim.dll`), for the [FH2 Mod Platform](https://github.com/Trinculo54/fh2-mod-platform). Texts in English and German.
 
-**[⬇ Download the latest version](../../releases/latest)** · current version: **0.4.0**
+**[⬇ Download the latest version](../../releases/latest)** · current version: **0.4.1**
 
 > Horizon Transit is new and in active development. The release list shows what is new.
 
@@ -18,7 +18,7 @@ One mod, one file (`TransportSim.dll`), for the [FH2 Mod Platform](https://githu
 ### 🚕 Rides
 - **3 requests nearby** on the phone, short, medium and long, at 208 real places of the game (festival, towns, meeting points).
 - The game's **GPS** guides you to the pickup and on to the destination. Stop there and the passenger gets in or out.
-- **Satisfaction** from your driving: hard throttle, braking, cornering, speeding and crashes cost, calm driving pays back. Every passenger has a speed limit. **Pay and 1–5 stars** at the end.
+- **Satisfaction** from your driving: hard throttle, braking, cornering, speeding and crashes cost, calm driving pays back. Every passenger has a speed limit, shown as a sign top left (mph or km/h, as the game is set). **Pay and 1–5 stars** at the end.
 - **40 passengers with a life**: name, age, job and a story they tell bit by bit. Regulars know you, remember your last car and how the last ride went.
 - **Passenger kinds**: normal, relaxed, in a hurry, car fan, and special rides: **VIP**, **business client**, **wedding couple**, **day trip**.
 - **Your car matters**: the mod knows all 353 cars of the game and their Autoshow group. People like or dislike groups; a saloon brings business clients, a classic a wedding, an off-roader a day trip.

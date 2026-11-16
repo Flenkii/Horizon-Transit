@@ -11,6 +11,9 @@ typedef void (*PhoneLogFn)(const char *format, ...);
 void phone_window_start(PhoneLogFn log);
 /* what to show; want = 0 hides it. Any thread, cheap (the picture is drawn on the window's thread). */
 void phone_window_show(const TsHud *h, int theme, int want);
+/* the speed-limit sign at the top left (number in the shown unit); want = 0 hides it. Shown only while the
+   phone isn't. Any thread, cheap. */
+void phone_window_sign(int number, const char *unit, int over, int want);
 /* 1 while the window exists (else use the HUD list) */
 int phone_window_ok(void);
 /* 1 when the phone is on screen now */

@@ -9,6 +9,8 @@ static PhoneLogFn plog;
 static SRWLOCK lock = SRWLOCK_INIT;
 static TsHud want_hud;
 static int want_theme, want_on;
+static int sign_number, sign_over, sign_on;
+static char sign_unit[8];
 static volatile LONG ok, visible;
 
 void phone_window_show(const TsHud *h, int theme, int want) {
@@ -19,12 +21,20 @@ void phone_window_show(const TsHud *h, int theme, int want) {
     ReleaseSRWLockExclusive(&lock);
 }
 
+void phone_window_sign(int number, const char *unit, int over, int want) {
+    AcquireSRWLockExclusive(&lock);
+    sign_on = want && number > 0;
+    sign_number = number, sign_over = over;
+    snprintf(sign_unit, sizeof(sign_unit), "%s", unit ? unit : "");
+    ReleaseSRWLockExclusive(&lock);
+}
+
 int phone_window_ok(void) { return ok != 0; }
 int phone_window_visible(void) { return visible != 0; }
 
 /* ------------------------------------------------------------------ the game's window */
 
-static HWND own_window;
+static HWND own_window, sign_window;
 
 typedef struct {
     HWND best;
@@ -35,7 +45,7 @@ static BOOL CALLBACK find_game_cb(HWND w, LPARAM user) {
     FindGame *f = (FindGame *)user;
     DWORD pid = 0;
     GetWindowThreadProcessId(w, &pid);
-    if (pid != GetCurrentProcessId() || w == own_window || !IsWindowVisible(w) || GetWindow(w, GW_OWNER)) return TRUE;
+    if (pid != GetCurrentProcessId() || w == own_window || w == sign_window || !IsWindowVisible(w) || GetWindow(w, GW_OWNER)) return TRUE;
     LONG_PTR ex = GetWindowLongPtrW(w, GWL_EXSTYLE);
     if (ex & (WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TRANSPARENT)) return TRUE; /* other mods' overlays */
     RECT r;
@@ -130,6 +140,16 @@ static DWORD WINAPI window_thread(void *unused) {
     }
     InterlockedExchange(&ok, 1);
     plog("phone window made");
+    sign_window = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                                  wc.lpszClassName, L"Horizon Transit sign", WS_POPUP, 0, 0, 1, 1, NULL, NULL, inst, NULL);
+    if (!sign_window) plog("speed-limit sign window NOT made (error %lu)", GetLastError());
+    HDC sign_dc = CreateCompatibleDC(NULL);
+    HBITMAP sign_bmp = NULL;
+    HGDIOBJ sign_old = NULL;
+    uint32_t *sign_bits = NULL;
+    int sbw = 0, sbh = 0, sign_shown = 0, sign_drawn_number = -1, sign_drawn_flash = -1, sign_logged = 0;
+    float sign_drawn_scale = 0;
+    char sign_drawn_unit[8] = "";
 
     HWND game = NULL;
     ULONGLONG next_find = 0;
@@ -153,11 +173,14 @@ static DWORD WINAPI window_thread(void *unused) {
         Sleep(16);
 
         TsHud h;
-        int theme, on;
+        int theme, on, s_on, s_number, s_over;
+        char s_unit[8];
         AcquireSRWLockShared(&lock);
         on = want_on;
         theme = want_theme;
         if (on) h = want_hud;
+        s_on = sign_on, s_number = sign_number, s_over = sign_over;
+        memcpy(s_unit, sign_unit, sizeof(s_unit));
         ReleaseSRWLockShared(&lock);
 
         ULONGLONG now = GetTickCount64();
@@ -170,15 +193,68 @@ static DWORD WINAPI window_thread(void *unused) {
         POINT origin = {0, 0};
         int front = game && GetForegroundWindow() == game && !IsIconic(game) && GetClientRect(game, &client) &&
                     ClientToScreen(game, &origin) && client.bottom > 100;
+        float scale = front ? client.bottom / 1080.0f : 1.0f;
+        if (scale < 0.45f) scale = 0.45f;
+        if (scale > 3.0f) scale = 3.0f;
+
+        /* the speed-limit sign: top left, where the phone sits, while the phone is closed */
+        if (sign_window) {
+            int want_sign = s_on && front && !on;
+            if (!want_sign) {
+                if (sign_shown) ShowWindow(sign_window, SW_HIDE), sign_shown = 0;
+            } else {
+                int flash = s_over && (GetTickCount64() / 400) % 2 == 0;
+                int sw, sh;
+                ts_sign_size(scale, &sw, &sh);
+                int dirty = s_number != sign_drawn_number || flash != sign_drawn_flash || scale != sign_drawn_scale ||
+                            strcmp(s_unit, sign_drawn_unit) != 0 || !sign_bmp;
+                if (dirty && (sw != sbw || sh != sbh || !sign_bmp)) {
+                    if (sign_bmp) SelectObject(sign_dc, sign_old), DeleteObject(sign_bmp);
+                    BITMAPINFO bi;
+                    memset(&bi, 0, sizeof(bi));
+                    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+                    bi.bmiHeader.biWidth = sw;
+                    bi.bmiHeader.biHeight = -sh;
+                    bi.bmiHeader.biPlanes = 1;
+                    bi.bmiHeader.biBitCount = 32;
+                    bi.bmiHeader.biCompression = BI_RGB;
+                    void *p = NULL;
+                    sign_bmp = CreateDIBSection(sign_dc, &bi, DIB_RGB_COLORS, &p, NULL, 0);
+                    if (sign_bmp) sign_old = SelectObject(sign_dc, sign_bmp), sign_bits = (uint32_t *)p, sbw = sw, sbh = sh;
+                }
+                if (sign_bmp) {
+                    if (dirty) {
+                        GdiFlush();
+                        memset(sign_bits, 0, (size_t)sbw * sbh * 4);
+                        SetBkMode(sign_dc, TRANSPARENT);
+                        Gdi g = {sign_dc};
+                        TsPhoneCanvas cv = {sign_bits, sbw, sbh, gdi_text, gdi_measure, &g};
+                        ts_sign_draw(s_number, s_unit, flash, scale, &cv);
+                        GdiFlush();
+                        ts_sign_finish(scale, &cv);
+                        sign_drawn_number = s_number, sign_drawn_flash = flash, sign_drawn_scale = scale;
+                        memcpy(sign_drawn_unit, s_unit, sizeof(sign_drawn_unit));
+                    }
+                    POINT spos = {origin.x + (int)(12 * scale), origin.y + (int)(80 * scale)};
+                    SIZE ssize = {sbw, sbh};
+                    POINT src = {0, 0};
+                    BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+                    UpdateLayeredWindow(sign_window, NULL, &spos, &ssize, sign_dc, &src, 0, &blend, ULW_ALPHA);
+                    if (!sign_shown) {
+                        ShowWindow(sign_window, SW_SHOWNOACTIVATE);
+                        SetWindowPos(sign_window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                        sign_shown = 1;
+                        if (!sign_logged++) plog("speed-limit sign shown (%d %s)", s_number, s_unit);
+                    }
+                }
+            }
+        }
+
         if (!on || !front) {
             if (shown) ShowWindow(own_window, SW_HIDE), shown = 0, alpha = 0;
             InterlockedExchange(&visible, 0);
             continue;
         }
-
-        float scale = client.bottom / 1080.0f;
-        if (scale < 0.45f) scale = 0.45f;
-        if (scale > 3.0f) scale = 3.0f;
         SYSTEMTIME st;
         GetLocalTime(&st);
         char clock[8];

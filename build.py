@@ -15,7 +15,25 @@ def run(cmd):
     subprocess.check_call(cmd, cwd=ROOT)
 
 
+def po_header():
+    """l10n/de.po (die deutschen Menuetexte) als C-Text in src/l10n_de.h"""
+    with open(os.path.join(ROOT, "l10n", "de.po"), encoding="utf-8") as f:
+        lines = f.read().split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    out = ["/* The German menu texts (l10n/de.po, built in by build.py: don't edit here). */",
+           "#ifndef TS_L10N_DE_H", "#define TS_L10N_DE_H", "static const char ts_l10n_de[] ="]
+    out += ['    "' + l.replace("\\", "\\\\").replace('"', '\\"') + '\\n"' for l in lines]
+    out += ["    ;", "#endif", ""]
+    text = "\n".join(out)
+    path = os.path.join(ROOT, "src", "l10n_de.h")
+    if not os.path.exists(path) or open(path, encoding="utf-8").read() != text:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+
+
 def main():
+    po_header()
     zig = [sys.executable, "-m", "ziglang", "cc"]
     os.makedirs(os.path.join(ROOT, "out"), exist_ok=True)
     # 1. Logik-Tests auf diesem PC

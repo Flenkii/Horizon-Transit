@@ -1,0 +1,125 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: de\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgctxt "row.AutoNavigation.label"
+msgid "Auto GPS"
+msgstr "Navigation automatisch"
+
+msgctxt "row.AutoNavigation.description"
+msgid "Sets the game's GPS to each pickup, destination and stop."
+msgstr "Setzt das GPS des Spiels automatisch auf Abholort, Ziel und Haltestelle."
+
+msgctxt "row.BusLinesNeedBus.label"
+msgid "Bus lines need the bus"
+msgstr "Buslinien nur im Bus"
+
+msgctxt "row.BusLinesNeedBus.description"
+msgid "On: bus lines only in the game's bus (PG Bus). Off: in any car."
+msgstr "An: Buslinien gehen nur, wenn du den Bus des Spiels (PG Bus) fährst. Aus: mit jedem Auto."
+
+msgctxt "row.CareerExtras.label"
+msgid "Reputation, specials, wishes"
+msgstr "Ruf, Sonderfahrten, Wünsche"
+
+msgctxt "row.CareerExtras.description"
+msgid "On: reputation changes pay and requests, VIPs and special rides appear, passengers make wishes. Off: like 0.3."
+msgstr "An: der Ruf wirkt auf Bezahlung und Anfragen, VIPs und Sonderfahrten kommen, Fahrgäste haben Wünsche. Aus: wie in 0.3."
+
+msgctxt "row.PhoneArrowKeys.label"
+msgid "Phone with arrow keys"
+msgstr "Handy mit Pfeiltasten"
+
+msgctxt "row.PhoneArrowKeys.description"
+msgid "While the phone is open: Up/Down = choose, Enter = take, Backspace = close; these keys then do nothing in the game."
+msgstr "Solange das Handy offen ist: Pfeil hoch/runter = auswählen, Enter = annehmen, Rücktaste = schließen. Diese Tasten wirken dann nicht im Spiel."
+
+msgctxt "row.TimeLimit.choice.0"
+msgid "Relaxed"
+msgstr "Locker"
+
+msgctxt "row.TimeLimit.choice.1"
+msgid "Normal"
+msgstr "Normal"
+
+msgctxt "row.TimeLimit.choice.2"
+msgid "Strict"
+msgstr "Streng"
+
+msgctxt "row.TimeLimit.label"
+msgid "Time limits"
+msgstr "Zeitlimits"
+
+msgctxt "row.TimeLimit.description"
+msgid "How much time passengers give you."
+msgstr "Wie viel Zeit Fahrgäste dir geben."
+
+msgctxt "row.Language.choice.0"
+msgid "Game"
+msgstr "Spiel"
+
+msgctxt "row.Language.label"
+msgid "Language"
+msgstr "Sprache"
+
+msgctxt "row.Language.description"
+msgid "Language of the phone, pop-ups and passengers. Game: the game's language. This menu always follows the game."
+msgstr "Sprache von Handy, Meldungen und Fahrgästen. Spiel: die Sprache des Spiels. Dieses Menü folgt immer dem Spiel."
+
+msgctxt "row.PhoneStyle.choice.0"
+msgid "Night"
+msgstr "Nacht"
+
+msgctxt "row.PhoneStyle.choice.1"
+msgid "Light"
+msgstr "Hell"
+
+msgctxt "row.PhoneStyle.choice.2"
+msgid "Festival"
+msgstr "Festival"
+
+msgctxt "row.PhoneStyle.choice.3"
+msgid "HUD list"
+msgstr "HUD-Liste"
+
+msgctxt "row.PhoneStyle.label"
+msgid "Phone design"
+msgstr "Handy-Design"
+
+msgctxt "row.PhoneStyle.description"
+msgid "How the phone looks. HUD list: the old list in the HUD instead of the phone."
+msgstr "Wie das Handy aussieht. HUD-Liste: die alte Liste im HUD statt des Handys."
+
+msgctxt "row.BusInAutoshow.label"
+msgid "Bus in the Autoshow"
+msgstr "Bus im Autohaus"
+
+msgctxt "row.BusInAutoshow.description"
+msgid "EXPERIMENTAL: makes the game's traffic bus (PG_BUS_14) buyable in the Autoshow, in the Ford Transit's group. Also works from the FH2MP launcher; the database file isn't changed. Don't buy or drive it online. A save backup is made."
+msgstr "EXPERIMENTELL: macht den Verkehrsbus des Spiels (PG_BUS_14) im Autohaus kaufbar, in der Gruppe des Ford Transit. Geht auch über den FH2MP-Launcher, die Datenbankdatei wird nicht verändert. Nicht online kaufen oder fahren. Ein Spielstand-Backup wird angelegt."
+
+msgctxt "hotkey.Phone.label"
+msgid "Phone open/close"
+msgstr "Handy öffnen/schließen"
+
+msgctxt "hotkey.Next.label"
+msgid "Next entry"
+msgstr "Nächster Eintrag"
+
+msgctxt "hotkey.Accept.label"
+msgid "Accept / cancel"
+msgstr "Annehmen / Abbrechen"
+
+msgctxt "page.App.label"
+msgid "Horizon Transit (jobs)"
+msgstr "Horizon Transit (Aufträge)"
+
+msgctxt "page.App.description"
+msgid "Take rides and bus lines; account and rating."
+msgstr "Fahraufträge und Buslinien annehmen, Konto und Bewertung."
+
+msgctxt "mod.description"
+msgid "Horizon Transit - Your festival. Your route. Rides and bus lines with virtual passengers: phone on F9, GPS route, time limit, speed, passenger comfort and the company's funds."
+msgstr "Horizon Transit - Dein Festival. Deine Route. Fahrdienst und Buslinien mit virtuellen Fahrgästen: Handy mit F9, GPS-Route, Zeitlimit, Tempo, Kundenzufriedenheit und Firmenkasse."

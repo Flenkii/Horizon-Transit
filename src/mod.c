@@ -18,6 +18,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,7 +33,7 @@
 #include "phone_window.h"
 
 #define MOD_NAME "Horizon Transit"
-#define MOD_VERSION "0.4.0"
+#define MOD_VERSION "0.4.1"
 #define MOD_FOLDER L"TransportSim"
 
 /* ------------------------------------------------------------------ game addresses (checked below) */
@@ -810,6 +811,29 @@ static void phone_setting_press(int i) {
     log_line("phone: setting %s = %d", s->key, next);
 }
 
+/* Which speed unit the game shows. The game keeps a locale object (pointer at game+RVA_LOCALE): at +0x2C its
+   Units option (-1 = as the language, 0 = English units, 2 = metric), at +0x28 the index of the language, and from the
+   object's start one 0xE0-byte entry per language whose +0x98 is that language's unit system. 0 and 1 mean miles. -1: not readable. */
+#define RVA_LOCALE 0x36629A0u
+static int game_imperial(void) {
+    if (!game) return -1;
+    const unsigned char *const *slot = (const unsigned char *const *)(game + RVA_LOCALE);
+    if (!readable(slot, sizeof(*slot))) return -1;
+    const unsigned char *loc = *slot;
+    if (!readable(loc + 0x28, 8)) return -1;
+    int option = *(const int *)(loc + 0x2C);
+    int units = option;
+    if (option == -1) {
+        int lang = *(const int *)(loc + 0x28);
+        if (lang < 0 || lang > 64) return -1;
+        const unsigned char *entry = loc + (size_t)lang * 0xE0u; /* the language entries lie in the object itself */
+        if (!readable(entry + 0x98, 4)) return -1;
+        units = *(const int *)(entry + 0x98);
+    }
+    if (units < 0 || units > 8) return -1;
+    return units == 0 || units == 1;
+}
+
 static DWORD WINAPI worker(LPVOID unused) {
     (void)unused;
     game = (unsigned char *)api->wait_for_code(0xFFFFFFFFu);
@@ -820,9 +844,17 @@ static DWORD WINAPI worker(LPVOID unused) {
     log_line("game at %p", (void *)game);
     install_hooks();
     bus_autoshow_hook();
-    int logged_car = 0, logged_page_wait = 0;
+    int logged_car = 0, logged_page_wait = 0, units_tick = 0, imperial = -1;
     for (;;) {
         Sleep(100);
+        if (units_tick-- <= 0) { /* the game's unit setting, every 3 seconds */
+            units_tick = 30;
+            int now = game_imperial();
+            if (now >= 0 && now != imperial) {
+                imperial = now;
+                log_line("speed unit from the game: %s", now ? "mph" : "km/h");
+            }
+        }
         TsEvent events[TS_MAX_EVENTS];
         int n = 0, save = 0, job = 0, de = 0;
         TsHud h;
@@ -832,6 +864,7 @@ static DWORD WINAPI worker(LPVOID unused) {
         core.time_factor = time_factor();
         core.bus_needs_bus = opt_bus_needs_bus;
         core.extras_off = !opt_extras;
+        if (imperial >= 0) core.imperial = imperial;
         if (InterlockedExchange(&want_toggle, 0)) ts_phone_toggle(&core);
         if (InterlockedExchange(&want_next, 0)) ts_phone_next(&core);
         if (InterlockedExchange(&want_prev, 0)) ts_phone_prev(&core);
@@ -870,8 +903,16 @@ static DWORD WINAPI worker(LPVOID unused) {
             phone_window_show(&h, opt_phone_style, h.panel && page);
             hud_h.panel = 0;
             if (h.panel && !page && !logged_page_wait++) log_line("phone window waits: the HUD page is not on screen");
+            /* with a passenger: a speed-limit sign top left instead of the "Max 120" chip */
+            int sign = h.sign_limit > 0 && page;
+            phone_window_sign(h.sign_limit, h.sign_unit, h.sign_over, sign);
+            if (sign) {
+                if (h.sign_over) snprintf(hud_h.chip2, sizeof(hud_h.chip2), "%s", de ? "Zu schnell!" : "Too fast!");
+                else hud_h.chip2[0] = 0;
+            }
         } else {
             phone_window_show(&h, 0, 0);
+            phone_window_sign(0, "", 0, 0);
         }
         push_hud(&hud_h);
         phone_popup(&hud_h, de, job);
@@ -949,13 +990,16 @@ static void page_open(void *user, const char *page_key) {
         ROW(NULL, de ? "Fahraufträge" : "Ride requests", c.car_name, NULL, FH2_ROW_HEADING);
         for (int i = 0; i < c.offer_count && i < TS_PHONE_OFFERS; ++i) {
             const TsOffer *o = &c.offers[i];
-            snprintf(v, sizeof(v), "%.1f km · %d €", o->trip_m / 1000.0f, o->pay);
-            static const char *const types_de[] = {"Normal", "Gemütlich", "Eilig", "Autofan"};
-            static const char *const types_en[] = {"Normal", "Relaxed", "In a hurry", "Car fan"};
-            snprintf(descs[i], sizeof(descs[i]), "%s (%s) %s %s %s. %s %d:%02d, %s %d km/h.", ts_passenger_name(o->passenger),
-                     (de ? types_de : types_en)[o->ptype & 3], de ? "wartet bei" : "waits at", ts_places[o->pickup].name,
+            char dist[24];
+            if (c.imperial) snprintf(dist, sizeof(dist), "%.1f mi", o->trip_m / 1609.344f);
+            else snprintf(dist, sizeof(dist), "%.1f km", o->trip_m / 1000.0f);
+            snprintf(v, sizeof(v), "%s · %d €", dist, o->pay);
+            static const char *const types_de[TS_P_KINDS] = {"Normal", "Gemütlich", "Eilig", "Autofan", "VIP", "Geschäftskunde", "Hochzeitspaar", "Ausflug"};
+            static const char *const types_en[TS_P_KINDS] = {"Normal", "Relaxed", "In a hurry", "Car fan", "VIP", "Business", "Wedding", "Day trip"};
+            snprintf(descs[i], sizeof(descs[i]), "%s (%s) %s %s %s. %s %d:%02d, %s %d %s.", ts_passenger_name(o->passenger),
+                     (de ? types_de : types_en)[o->ptype >= 0 && o->ptype < TS_P_KINDS ? o->ptype : 0], de ? "wartet bei" : "waits at", ts_places[o->pickup].name,
                      de ? "und möchte dorthin" : "and wants to go there", de ? "Zeitlimit" : "Time limit", (int)o->limit_s / 60,
-                     (int)o->limit_s % 60, de ? "höchstens" : "at most", o->max_kmh);
+                     (int)o->limit_s % 60, de ? "höchstens" : "at most", ts_speed_shown(&c, o->max_kmh), ts_speed_unit(&c));
             ROW(offer_keys[i], ts_places[o->dest].name, v, descs[i], FH2_ROW_NORMAL);
         }
         if (!c.offer_count) ROW(NULL, de ? "Keine Anfragen: erst losfahren" : "No requests: drive first", "", NULL, FH2_ROW_DIM);
@@ -968,7 +1012,7 @@ static void page_open(void *user, const char *page_key) {
             if (!locked) snprintf(v, sizeof(v), "%u %s", ts_lines[i].stop_count, de ? "Halte" : "stops");
             snprintf(descs[4 + i], sizeof(descs[4 + i]), "%s: %s. %s", de ? "Start" : "Start", ts_places[ts_lines[i].stops[0]].name,
                      locked ? (de ? "Geht nur im Bus des Spiels (PG Bus)." : "Only in the game's bus (PG Bus).")
-                            : (de ? "Höchstens 80 km/h." : "At most 80 km/h."));
+                            : (c.imperial ? (de ? "Höchstens 50 mph." : "At most 50 mph.") : (de ? "Höchstens 80 km/h." : "At most 80 km/h.")));
             ROW(line_keys[i], d, v, descs[4 + i], locked ? FH2_ROW_DIM : FH2_ROW_NORMAL);
         }
     }
@@ -993,14 +1037,24 @@ static void page_select(void *user, const char *page_key, const char *row_key) {
     else if (!strcmp(row_key, "cancel")) InterlockedExchange(&want_cancel, 1);
 }
 
+/* ------------------------------------------------------------------ the menu texts in the game's language
+   English in the code, German from l10n_de.h; the platform shows each in the game's language (API 10) and
+   follows it when the game picks its language. Older platforms get the English. */
+#include "l10n_de.h"
+static const char *TR(const char *key, const char *english) {
+    if (api->api_version < 10 || api->size < offsetof(FH2ModApi, tr) + sizeof(api->tr) || !api->tr) return english;
+    const char *t = api->tr(mod, key, english);
+    return t ? t : english;
+}
+
 static void add_rows(void) {
     if (api->api_version < 4) return;
     FH2Setting s;
     memset(&s, 0, sizeof(s));
     s.size = sizeof(s);
     s.key = "AutoNavigation";
-    s.label = "Navigation automatisch / Auto GPS";
-    s.description = "Setzt das GPS des Spiels automatisch auf Abholort, Ziel und Haltestelle. / Sets the game's GPS to each pickup, destination and stop.";
+    s.label = TR("row.AutoNavigation.label", "Auto GPS");
+    s.description = TR("row.AutoNavigation.description", "Sets the game's GPS to each pickup, destination and stop.");
     s.value = opt_nav;
     s.on_change = on_setting;
     api->add_setting(mod, &s);
@@ -1008,9 +1062,8 @@ static void add_rows(void) {
     memset(&s, 0, sizeof(s));
     s.size = sizeof(s);
     s.key = "BusLinesNeedBus";
-    s.label = "Buslinien nur im Bus / Bus lines need the bus";
-    s.description = "An: Buslinien gehen nur, wenn du den Bus des Spiels (PG Bus) fährst. Aus: mit jedem Auto. / "
-                    "On: bus lines only in the game's bus (PG Bus). Off: in any car.";
+    s.label = TR("row.BusLinesNeedBus.label", "Bus lines need the bus");
+    s.description = TR("row.BusLinesNeedBus.description", "On: bus lines only in the game's bus (PG Bus). Off: in any car.");
     s.value = opt_bus_needs_bus;
     s.on_change = on_setting;
     api->add_setting(mod, &s);
@@ -1018,9 +1071,9 @@ static void add_rows(void) {
     memset(&s, 0, sizeof(s));
     s.size = sizeof(s);
     s.key = "CareerExtras";
-    s.label = "Ruf, Sonderfahrten, Wünsche / Reputation, specials, wishes";
-    s.description = "An: der Ruf wirkt auf Bezahlung und Anfragen, VIPs und Sonderfahrten kommen, Fahrgäste haben Wünsche. Aus: wie in 0.3. / "
-                    "On: reputation changes pay and requests, VIPs and special rides appear, passengers make wishes. Off: like 0.3.";
+    s.label = TR("row.CareerExtras.label", "Reputation, specials, wishes");
+    s.description = TR("row.CareerExtras.description",
+                       "On: reputation changes pay and requests, VIPs and special rides appear, passengers make wishes. Off: like 0.3.");
     s.value = opt_extras;
     s.on_change = on_setting;
     api->add_setting(mod, &s);
@@ -1028,20 +1081,21 @@ static void add_rows(void) {
     memset(&s, 0, sizeof(s));
     s.size = sizeof(s);
     s.key = "PhoneArrowKeys";
-    s.label = "Handy mit Pfeiltasten / Phone with arrow keys";
-    s.description = "Solange das Handy offen ist: Pfeil hoch/runter = auswählen, Enter = annehmen, Rücktaste = schließen. Diese Tasten wirken dann nicht im Spiel. / "
-                    "While the phone is open: Up/Down = choose, Enter = take, Backspace = close; these keys then do nothing in the game.";
+    s.label = TR("row.PhoneArrowKeys.label", "Phone with arrow keys");
+    s.description = TR("row.PhoneArrowKeys.description",
+                       "While the phone is open: Up/Down = choose, Enter = take, Backspace = close; these keys then do nothing in the game.");
     s.value = opt_arrow_keys;
     s.on_change = on_setting;
     api->add_setting(mod, &s);
 
     if (api->api_version >= 9) {
-        static const char *const limits[3] = {"Locker / Relaxed", "Normal", "Streng / Strict"};
+        const char *limits[3] = {TR("row.TimeLimit.choice.0", "Relaxed"), TR("row.TimeLimit.choice.1", "Normal"),
+                                 TR("row.TimeLimit.choice.2", "Strict")};
         memset(&s, 0, sizeof(s));
         s.size = sizeof(s);
         s.key = "TimeLimit";
-        s.label = "Zeitlimits / Time limits";
-        s.description = "Wie viel Zeit Fahrgäste dir geben. / How much time passengers give you.";
+        s.label = TR("row.TimeLimit.label", "Time limits");
+        s.description = TR("row.TimeLimit.description", "How much time passengers give you.");
         s.kind = FH2_SETTING_CHOICE;
         s.choices = limits;
         s.choice_count = 3;
@@ -1049,12 +1103,13 @@ static void add_rows(void) {
         s.on_change = on_setting;
         api->add_setting(mod, &s);
 
-        static const char *const languages[3] = {"Spiel / Game", "Deutsch", "English"};
+        const char *languages[3] = {TR("row.Language.choice.0", "Game"), "Deutsch", "English"};
         memset(&s, 0, sizeof(s));
         s.size = sizeof(s);
         s.key = "Language";
-        s.label = "Sprache / Language";
-        s.description = "Sprache der Transport-Texte. / Language of the transport texts.";
+        s.label = TR("row.Language.label", "Language");
+        s.description = TR("row.Language.description",
+                           "Language of the phone, pop-ups and passengers. Game: the game's language. This menu always follows the game.");
         s.kind = FH2_SETTING_CHOICE;
         s.choices = languages;
         s.choice_count = 3;
@@ -1062,13 +1117,13 @@ static void add_rows(void) {
         s.on_change = on_setting;
         api->add_setting(mod, &s);
 
-        static const char *const styles[4] = {"Nacht / Night", "Hell / Light", "Festival", "HUD-Liste / HUD list"};
+        const char *styles[4] = {TR("row.PhoneStyle.choice.0", "Night"), TR("row.PhoneStyle.choice.1", "Light"),
+                                 TR("row.PhoneStyle.choice.2", "Festival"), TR("row.PhoneStyle.choice.3", "HUD list")};
         memset(&s, 0, sizeof(s));
         s.size = sizeof(s);
         s.key = "PhoneStyle";
-        s.label = "Handy-Design / Phone design";
-        s.description = "Wie das Handy aussieht. HUD-Liste: die alte Liste im HUD statt des Handys. / "
-                        "How the phone looks. HUD list: the old list in the HUD instead of the phone.";
+        s.label = TR("row.PhoneStyle.label", "Phone design");
+        s.description = TR("row.PhoneStyle.description", "How the phone looks. HUD list: the old list in the HUD instead of the phone.");
         s.kind = FH2_SETTING_CHOICE;
         s.choices = styles;
         s.choice_count = 4;
@@ -1080,11 +1135,11 @@ static void add_rows(void) {
     memset(&s, 0, sizeof(s));
     s.size = sizeof(s);
     s.key = "BusInAutoshow";
-    s.label = "Bus im Autohaus (experimentell) / Bus in the Autoshow";
-    s.description = "EXPERIMENTELL: macht den Verkehrsbus des Spiels (PG_BUS_14) im Autohaus kaufbar (Gruppe des Ford Transit). Geht auch über den FH2MP-Launcher, "
-                    "die Datenbank wird nicht verändert. Nicht online kaufen oder fahren. Ungetestet, ein Spielstand-Backup wird angelegt. / "
-                    "EXPERIMENTAL: makes the game's traffic bus buyable in the Autoshow, also from the FH2MP launcher; the database isn't changed. "
-                    "Don't buy or drive it online. Untested; a save backup is made.";
+    s.label = TR("row.BusInAutoshow.label", "Bus in the Autoshow");
+    s.description = TR("row.BusInAutoshow.description",
+                       "EXPERIMENTAL: makes the game's traffic bus (PG_BUS_14) buyable in the Autoshow, in the Ford Transit's group. "
+                       "Also works from the FH2MP launcher; the database file isn't changed. Don't buy or drive it online. "
+                       "A save backup is made.");
     s.value = opt_bus_autoshow;
     s.needs_restart = 1;
     s.on_change = on_setting;
@@ -1096,8 +1151,8 @@ static void add_keys(void) {
         log_line("the platform has no hotkeys (API %u): use the page under Pause > MODS > YOUR MODS", api->api_version);
         return;
     }
-    static const char *const labels[3] = {"Handy öffnen/schließen / Phone", "Nächster Eintrag / Next entry",
-                                          "Annehmen / Abbrechen / Accept / cancel"};
+    const char *labels[3] = {TR("hotkey.Phone.label", "Phone open/close"), TR("hotkey.Next.label", "Next entry"),
+                             TR("hotkey.Accept.label", "Accept / cancel")};
     for (int i = 0; i < 3; ++i) {
         FH2Hotkey k;
         memset(&k, 0, sizeof(k));
@@ -1120,8 +1175,8 @@ static void add_page(void) {
     p.size = sizeof(p);
     p.key = "App";
     p.title = "Horizon Transit";
-    p.label = "Horizon Transit (Aufträge / Jobs)";
-    p.description = "Fahraufträge und Buslinien annehmen, Konto und Bewertung. / Take rides and bus lines; account and rating.";
+    p.label = TR("page.App.label", "Horizon Transit (jobs)");
+    p.description = TR("page.App.description", "Take rides and bus lines; account and rating.");
     p.on_open = page_open;
     p.on_select = page_select;
     if (!api->add_page(mod, &p)) log_line("the page could not be added (see above)");
@@ -1203,11 +1258,14 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     info.version = MOD_VERSION;
     info.platform_version = "2.9.0";
     info.check_updates = 0;
-    info.description = "Horizon Transit - Dein Festival. Deine Route. Fahrdienst und Buslinien mit virtuellen Fahrgästen: "
-                       "Handy mit F9, GPS-Route, Zeitlimit, Tempo, Kundenzufriedenheit und Verdienst.";
+    info.description = "Horizon Transit - Your festival. Your route. Rides and bus lines with virtual passengers: "
+                       "phone on F9, GPS route, time limit, speed, passenger comfort and the company's funds.";
     info.offline_only = 1;
     mod = api->register_mod(&info);
     if (!mod) return 0; /* online: the platform doesn't run this mod */
+    if (api->api_version >= 10 && api->size >= offsetof(FH2ModApi, add_translation) + sizeof(api->add_translation) &&
+        api->add_translation)
+        log_line("German menu texts: %d", api->add_translation(mod, "de", ts_l10n_de, strlen(ts_l10n_de)));
 
     /* own folder next to azimuth.exe: settings, stats and logs */
     wchar_t folder[MAX_PATH];

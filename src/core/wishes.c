@@ -54,7 +54,7 @@ static int stop_place(TsCore *c) {
 }
 
 static void wish_begin(TsCore *c) {
-    int type = c->job.ptype, max = ride_max_kmh(c);
+    int type = c->job.ptype, max = c->job.max_kmh > 0 ? c->job.max_kmh : 120;
     int options[4], n = 0;
     options[n++] = TS_WISH_SMOOTH;
     if (max >= 100 && c->speed > 16.0f) options[n++] = TS_WISH_SLOWER;
@@ -108,7 +108,7 @@ void wish_step(TsCore *c) {
     double since = c->t - c->wish_start;
     switch (c->wish) {
     case TS_WISH_SLOWER:
-        if (since > 5.0 && c->speed * 3.6f > (float)c->wish_limit + 3.0f) wish_end(c, 0);
+        if (since > 5.0 && c->speed * 3.6f > (float)unit_kmh(c, c->wish_limit) + 3.0f) wish_end(c, 0);
         else if (c->t >= c->wish_until) wish_end(c, 1);
         break;
     case TS_WISH_SMOOTH:
@@ -116,7 +116,7 @@ void wish_step(TsCore *c) {
         else if (c->t >= c->wish_until) wish_end(c, 1);
         break;
     case TS_WISH_FASTER:
-        if (c->speed * 3.6f >= (float)c->wish_limit) wish_end(c, 1);
+        if (c->speed * 3.6f >= (float)unit_kmh(c, c->wish_limit)) wish_end(c, 1);
         else if (c->t >= c->wish_until) wish_end(c, 0);
         break;
     case TS_WISH_STOP: {
@@ -147,9 +147,13 @@ void wish_chip(const TsCore *c, char *out, size_t size) {
     double left = c->wish_until - c->t;
     format_time(time, sizeof(time), left > 0.0 ? left : 0.0);
     switch (c->wish) {
-    case TS_WISH_SLOWER: snprintf(out, size, "%s %d km/h · %s", T(c, "Wunsch: unter", "Wish: under"), c->wish_limit, time); break;
+    case TS_WISH_SLOWER:
+        snprintf(out, size, "%s %d %s · %s", T(c, "Wunsch: unter", "Wish: under"), ts_speed_shown(c, c->wish_limit), ts_speed_unit(c), time);
+        break;
     case TS_WISH_SMOOTH: snprintf(out, size, "%s · %s", T(c, "Wunsch: ganz sanft", "Wish: smooth"), time); break;
-    case TS_WISH_FASTER: snprintf(out, size, "%s %d km/h · %s", T(c, "Wunsch: über", "Wish: over"), c->wish_limit, time); break;
+    case TS_WISH_FASTER:
+        snprintf(out, size, "%s %d %s · %s", T(c, "Wunsch: über", "Wish: over"), ts_speed_shown(c, c->wish_limit), ts_speed_unit(c), time);
+        break;
     case TS_WISH_STOP:
         snprintf(out, size, "%s", c->wish_stop_stage == 2 ? T(c, "Kurzer Halt ...", "Quick stop ...") : T(c, "Wunsch: kurz halten", "Wish: quick stop"));
         break;
