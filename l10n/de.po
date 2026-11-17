@@ -20,6 +20,54 @@ msgctxt "row.BusLinesNeedBus.description"
 msgid "On: bus lines only in the game's bus (PG Bus). Off: in any car."
 msgstr "An: Buslinien gehen nur, wenn du den Bus des Spiels (PG Bus) fährst. Aus: mit jedem Auto."
 
+msgctxt "row.Complaints.label"
+msgid "Passenger complaints"
+msgstr "Fahrgäste meckern"
+
+msgctxt "row.Complaints.description"
+msgid "On: passengers say something about harsh braking, speeding, crashes or being late. Off: they stay quiet about it, but the rating still counts."
+msgstr "An: Fahrgäste sagen etwas zu scharfem Bremsen, zu schnellem Fahren, Unfällen oder Verspätung. Aus: sie sagen nichts dazu, die Bewertung zählt aber trotzdem."
+
+msgctxt "row.Voices.label"
+msgid "Passenger voices (experimental)"
+msgstr "Stimmen der Fahrgäste (Versuch)"
+
+msgctxt "row.Voices.description"
+msgid "Passengers read their lines out loud with the Windows speech voices (German: Hedda, English: David or Zira). They sound robotic. Off by default."
+msgstr "Fahrgäste sprechen ihre Sätze laut, mit den Vorlesestimmen von Windows (Deutsch: Hedda, Englisch: David oder Zira). Klingt nach Roboter. Standardmäßig aus."
+
+msgctxt "row.Voices.choice.0"
+msgid "Off"
+msgstr "Aus"
+
+msgctxt "row.Voices.choice.1"
+msgid "Quiet"
+msgstr "Leise"
+
+msgctxt "row.Voices.choice.2"
+msgid "Normal"
+msgstr "Normal"
+
+msgctxt "row.Voices.choice.3"
+msgid "Loud"
+msgstr "Laut"
+
+msgctxt "row.PhoneMouse.label"
+msgid "Phone with the mouse"
+msgstr "Handy mit der Maus"
+
+msgctxt "row.PhoneMouse.description"
+msgid "While the phone is open: click a tab to open it, click an entry to pick it, click it again to take it; the wheel scrolls. Clicks on the phone don't reach the game."
+msgstr "Solange das Handy offen ist: Tab anklicken öffnet ihn, ein Eintrag anklicken wählt ihn, nochmal anklicken nimmt ihn; das Mausrad blättert. Klicks auf das Handy kommen nicht beim Spiel an."
+
+msgctxt "row.RidePanel.label"
+msgid "Ride panel by the speedometer"
+msgstr "Fahrt-Anzeige am Tacho"
+
+msgctxt "row.RidePanel.description"
+msgid "While a passenger rides: speed limit, G-meter (stay inside the circle), time left, the passenger's mood and wish, bottom right. Its place: RidePanelRight / RidePanelBottom in TransportSim.ini."
+msgstr "Solange ein Fahrgast mitfährt, unten rechts: Tempolimit, G-Kraft-Anzeige (im Kreis bleiben), Restzeit, Laune und Wunsch des Fahrgasts. Die Position: RidePanelRight / RidePanelBottom in TransportSim.ini."
+
 msgctxt "row.CareerExtras.label"
 msgid "Reputation, specials, wishes"
 msgstr "Ruf, Sonderfahrten, Wünsche"
@@ -27,14 +75,6 @@ msgstr "Ruf, Sonderfahrten, Wünsche"
 msgctxt "row.CareerExtras.description"
 msgid "On: reputation changes pay and requests, VIPs and special rides appear, passengers make wishes. Off: like 0.3."
 msgstr "An: der Ruf wirkt auf Bezahlung und Anfragen, VIPs und Sonderfahrten kommen, Fahrgäste haben Wünsche. Aus: wie in 0.3."
-
-msgctxt "row.PhoneArrowKeys.label"
-msgid "Phone with arrow keys"
-msgstr "Handy mit Pfeiltasten"
-
-msgctxt "row.PhoneArrowKeys.description"
-msgid "While the phone is open: Up/Down = choose, Enter = take, Backspace = close; these keys then do nothing in the game."
-msgstr "Solange das Handy offen ist: Pfeil hoch/runter = auswählen, Enter = annehmen, Rücktaste = schließen. Diese Tasten wirken dann nicht im Spiel."
 
 msgctxt "row.TimeLimit.choice.0"
 msgid "Relaxed"
@@ -81,16 +121,16 @@ msgid "Festival"
 msgstr "Festival"
 
 msgctxt "row.PhoneStyle.choice.3"
-msgid "HUD list"
-msgstr "HUD-Liste"
+msgid "Ocean"
+msgstr "Ozean"
 
 msgctxt "row.PhoneStyle.label"
 msgid "Phone design"
 msgstr "Handy-Design"
 
 msgctxt "row.PhoneStyle.description"
-msgid "How the phone looks. HUD list: the old list in the HUD instead of the phone."
-msgstr "Wie das Handy aussieht. HUD-Liste: die alte Liste im HUD statt des Handys."
+msgid "How the phone looks."
+msgstr "Wie das Handy aussieht."
 
 msgctxt "row.BusInAutoshow.label"
 msgid "Bus in the Autoshow"

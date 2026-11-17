@@ -31,9 +31,11 @@
 #include "core/stops.h"
 #include "core/bus_sql.h"
 #include "phone_window.h"
+#include "voice.h"
+#include "phone_draw.h"
 
 #define MOD_NAME "Horizon Transit"
-#define MOD_VERSION "0.4.1"
+#define MOD_VERSION "0.4.2"
 #define MOD_FOLDER L"TransportSim"
 
 /* ------------------------------------------------------------------ game addresses (checked below) */
@@ -99,16 +101,21 @@ static int nav_we_set; /* the GPS destination is ours (only then we clear it) */
 static wchar_t ini_path[MAX_PATH];
 static int opt_nav = 1, opt_bus_autoshow = 0, opt_time_limit = 1; /* 0 relaxed, 1 normal, 2 strict */
 static int opt_language = 0;                                        /* 0 the game's, 1 Deutsch, 2 English */
-static int opt_arrow_keys = 1; /* the phone takes the arrow keys, Enter and Backspace while it's open */
+static const int opt_arrow_keys = 1; /* the phone always takes the arrow keys, Enter and Backspace while it's open (0.4.1: no switch any more) */
 static int opt_bus_needs_bus = 1; /* bus lines only in the game's bus */
+static int opt_dash = 1, opt_dash_right = 410, opt_dash_bottom = 110; /* 0.4.2: the ride panel by the speedometer */
+static int opt_mouse = 1;         /* 0.4.1: click the phone with the mouse */
+static int opt_voices = 0;        /* 0.4.1: passengers read out by Windows speech: 0 off, 1 quiet, 2 normal, 3 loud */
+static int opt_complaints = 1;    /* 0.4.1: passengers remark on the driving */
 static int opt_extras = 1;        /* 0.4: reputation effects, special rides, wishes */
-static int opt_phone_style = 0;   /* 0 Night, 1 Light, 2 Festival (the phone window), 3 the HUD list */
+static int opt_phone_style = 0;   /* 0 Night, 1 Light, 2 Festival (the phone window; the HUD list only when it can't be made) */
 static uint32_t key_vk[3] = {VK_F9, VK_F10, VK_F11}, key_mod[3], key_pad[3] = {
     FH2_PAD_LB | FH2_PAD_RB | FH2_PAD_DPAD_UP, FH2_PAD_LB | FH2_PAD_RB | FH2_PAD_DPAD_RIGHT, FH2_PAD_LB | FH2_PAD_RB | FH2_PAD_A};
 static const char *const key_names[3] = {"Phone", "Next", "Accept"};
 
 /* asked by keys / the page, done by the worker under the lock */
 static volatile LONG want_tab; /* -1 / +1 */
+static volatile LONG want_click = -1; /* a mouse click: tab | row << 8 | (row2 + 1) << 16, -1 none */
 static volatile LONG want_toggle, want_next, want_prev, want_accept, want_row = -1, want_cancel;
 static volatile LONG phone_is_open; /* copied from the core by the worker */
 
@@ -171,14 +178,22 @@ static void ini_put_int(const char *section, const char *key, long long value) {
 
 static void load_settings(void) {
     opt_nav = ini_int("Settings", "AutoNavigation", 1) != 0;
-    opt_arrow_keys = ini_int("Settings", "PhoneArrowKeys", 1) != 0;
     opt_bus_needs_bus = ini_int("Settings", "BusLinesNeedBus", 1) != 0;
     opt_bus_autoshow = ini_int("Settings", "BusInAutoshow", 0) != 0;
     opt_extras = ini_int("Settings", "CareerExtras", 1) != 0;
+    opt_complaints = ini_int("Settings", "Complaints", 1) != 0;
+    opt_mouse = ini_int("Settings", "PhoneMouse", 1) != 0;
+    opt_dash = ini_int("Settings", "RidePanel", 1) != 0;
+    opt_dash_right = ini_int("Settings", "RidePanelRight", 410);
+    if (opt_dash_right == 300) opt_dash_right = 410; /* the first guess sat on the speedometer */
+    opt_dash_bottom = ini_int("Settings", "RidePanelBottom", 110);
+    if (opt_dash_bottom == 24) opt_dash_bottom = 110;
+    opt_voices = ini_int("Settings", "Voices", 0);
+    if (opt_voices < 0 || opt_voices > 3) opt_voices = 0;
     opt_time_limit = ini_int("Settings", "TimeLimit", 1);
     if (opt_time_limit < 0 || opt_time_limit > 2) opt_time_limit = 1;
     opt_phone_style = ini_int("Settings", "PhoneStyle", 0);
-    if (opt_phone_style < 0 || opt_phone_style > 3) opt_phone_style = 0;
+    if (opt_phone_style < 0 || opt_phone_style >= TS_THEMES) opt_phone_style = 0;
     opt_language = ini_int("Settings", "Language", 0);
     if (opt_language < 0 || opt_language > 2) opt_language = 0;
     for (int i = 0; i < 3; ++i) {
@@ -194,10 +209,15 @@ static void load_settings(void) {
 
 static void save_settings(void) {
     ini_put_int("Settings", "AutoNavigation", opt_nav);
-    ini_put_int("Settings", "PhoneArrowKeys", opt_arrow_keys);
     ini_put_int("Settings", "BusLinesNeedBus", opt_bus_needs_bus);
     ini_put_int("Settings", "BusInAutoshow", opt_bus_autoshow);
     ini_put_int("Settings", "CareerExtras", opt_extras);
+    ini_put_int("Settings", "Complaints", opt_complaints);
+    ini_put_int("Settings", "Voices", opt_voices);
+    ini_put_int("Settings", "PhoneMouse", opt_mouse);
+    ini_put_int("Settings", "RidePanel", opt_dash);
+    ini_put_int("Settings", "RidePanelRight", opt_dash_right);
+    ini_put_int("Settings", "RidePanelBottom", opt_dash_bottom);
     ini_put_int("Settings", "TimeLimit", opt_time_limit);
     ini_put_int("Settings", "Language", opt_language);
     ini_put_int("Settings", "PhoneStyle", opt_phone_style);
@@ -569,7 +589,25 @@ static void play(int which) {
     if (sound && api->api_version >= 10) api->play_ui_sound(mod, sound);
 }
 
-static void deliver(const TsEvent *e) {
+/* the phone window's thread: a click, the wheel */
+static void phone_clicked(int tab, int row, int row2) {
+    InterlockedExchange(&want_click, (LONG)((tab + 1) | (row + 1) << 8 | (row2 + 1) << 16));
+}
+static void phone_wheel(int direction) {
+    InterlockedExchange(direction < 0 ? &want_prev : &want_next, 1);
+}
+
+/* "Voices": the volume of each choice */
+static void apply_voices(void) {
+    static const int volumes[4] = {0, 45, 75, 100};
+    if (opt_voices <= 0) {
+        voice_stop();
+        return;
+    }
+    if (voice_start(log_line)) voice_volume(volumes[opt_voices]);
+}
+
+static void deliver(const TsEvent *e, int german) {
     if (e->kind == TS_EV_TOAST) {
         log_line("pop-up: %s | %s", e->title, e->text);
         if (api->api_version < 10) return;
@@ -585,15 +623,22 @@ static void deliver(const TsEvent *e) {
         api->show_toast(mod, &t);
     } else if (e->kind == TS_EV_FEED) {
         log_line("chat: %s: %s", e->title, e->text);
+        if (!(hud_ok() & FH2_HUD_AVAILABLE)) phone_window_feed(e->title, e->text, e->style); /* the HUD layer is off: our own lines */
+        if (opt_voices > 0 && e->speaker >= 0) voice_say(e->text, german, e->voice_female, e->voice_pitch, e->voice_rate);
         if (hud && hud_added && hud->version >= 2) {
-            FH2HudFeedLine line;
-            memset(&line, 0, sizeof(line));
-            line.size = sizeof(line);
-            line.name = e->title;
-            line.text = e->text;
-            line.style = (uint32_t)e->style;
-            line.ms = 7000;
-            hud->post_hud_feed(mod, &line);
+            /* the feed takes 64 characters a line (more are cut off): a longer line goes on in the next ones */
+            char parts[4][TS_TEXT];
+            int n = ts_feed_split(e->text, 52, parts, 4); /* 52: the name takes room on the line too */
+            for (int i = 0; i < n; ++i) {
+                FH2HudFeedLine line;
+                memset(&line, 0, sizeof(line));
+                line.size = sizeof(line);
+                line.name = i == 0 ? e->title : "";
+                line.text = parts[i];
+                line.style = (uint32_t)e->style;
+                line.ms = 7000 + 1500 * (uint32_t)(n - 1);
+                hud->post_hud_feed(mod, &line);
+            }
         }
     } else if (e->kind == TS_EV_SOUND) {
         play(e->sound);
@@ -769,25 +814,27 @@ typedef struct {
 } PhoneSetting;
 
 static PhoneSetting phone_settings[TS_SETTING_ROWS] = {
-    {"PhoneStyle", "Handy-Design", "Phone design", &opt_phone_style, 4},
+    {"PhoneStyle", "Handy-Design", "Phone design", &opt_phone_style, TS_THEMES},
     {"Language", "Sprache", "Language", &opt_language, 3},
     {"TimeLimit", "Zeitlimits", "Time limits", &opt_time_limit, 3},
+    {"Complaints", "Fahrgäste meckern", "Passenger complaints", &opt_complaints, 2},
     {"AutoNavigation", "Navigation automatisch", "Auto GPS", &opt_nav, 2},
     {"CareerExtras", "Ruf, Sonderfahrten, Wünsche", "Reputation, specials, wishes", &opt_extras, 2},
     {"BusLinesNeedBus", "Buslinien nur im Bus", "Bus lines need the bus", &opt_bus_needs_bus, 2},
-    {"PhoneArrowKeys", "Handy mit Pfeiltasten", "Phone with arrow keys", &opt_arrow_keys, 2},
+    {"Voices", "Stimmen (Versuch)", "Voices (experimental)", &opt_voices, 4},
 };
 
 static const char *phone_setting_value(int i, int de) {
-    static const char *const styles[4] = {"Nacht", "Hell", "Festival", "HUD-Liste"}, *const styles_en[4] = {"Night", "Light", "Festival", "HUD list"};
     static const char *const langs[3] = {"Spiel", "Deutsch", "English"}, *const langs_en[3] = {"Game", "Deutsch", "English"};
     static const char *const limits[3] = {"Locker", "Normal", "Streng"}, *const limits_en[3] = {"Relaxed", "Normal", "Strict"};
+    static const char *const voices[4] = {"Aus", "Leise", "Normal", "Laut"}, *const voices_en[4] = {"Off", "Quiet", "Normal", "Loud"};
     int v = *phone_settings[i].value;
     if (v < 0 || v >= phone_settings[i].count) v = 0;
     switch (i) {
-    case 0: return de ? styles[v] : styles_en[v];
+    case 0: return ts_theme_name(v, de);
     case 1: return de ? langs[v] : langs_en[v];
     case 2: return de ? limits[v] : limits_en[v];
+    case 7: return de ? voices[v] : voices_en[v];
     default: return v ? (de ? "An" : "On") : (de ? "Aus" : "Off");
     }
 }
@@ -864,6 +911,7 @@ static DWORD WINAPI worker(LPVOID unused) {
         core.time_factor = time_factor();
         core.bus_needs_bus = opt_bus_needs_bus;
         core.extras_off = !opt_extras;
+        core.complaints_off = !opt_complaints;
         if (imperial >= 0) core.imperial = imperial;
         if (InterlockedExchange(&want_toggle, 0)) ts_phone_toggle(&core);
         if (InterlockedExchange(&want_next, 0)) ts_phone_next(&core);
@@ -871,6 +919,8 @@ static DWORD WINAPI worker(LPVOID unused) {
         LONG tab = InterlockedExchange(&want_tab, 0);
         if (tab) ts_phone_tab(&core, (int)tab);
         if (InterlockedExchange(&want_accept, 0)) ts_phone_accept(&core);
+        LONG click = InterlockedExchange(&want_click, -1);
+        if (click >= 0) ts_phone_click(&core, (int)(click & 255) - 1, (int)(click >> 8 & 255) - 1, (int)(click >> 16 & 255) - 1);
         int pressed = core.setting_pressed;
         core.setting_pressed = -1;
         LONG row = InterlockedExchange(&want_row, -1);
@@ -892,11 +942,11 @@ static DWORD WINAPI worker(LPVOID unused) {
             logged_car = 1;
             log_line("the own car is seen (first sample)");
         }
-        for (int i = 0; i < n; ++i) deliver(&events[i]);
+        for (int i = 0; i < n; ++i) deliver(&events[i], de);
         if (save) save_stats(&stats);
-        /* the phone: its own window over the game (the HUD list when it can't, or when chosen) */
+        /* the phone: its own window over the game (the HUD list only when the window can't be made) */
         TsHud hud_h = h;
-        int window = opt_phone_style < 3 && phone_window_ok();
+        int window = phone_window_ok();
         if (window) {
             uint32_t ui = api->api_version >= 10 ? api->ui_status(mod) : 0;
             int page = !(ui & FH2_UI_TOASTS) || (ui & FH2_UI_ON_SCREEN); /* not over the pause menu or the map */
@@ -905,14 +955,14 @@ static DWORD WINAPI worker(LPVOID unused) {
             if (h.panel && !page && !logged_page_wait++) log_line("phone window waits: the HUD page is not on screen");
             /* with a passenger: a speed-limit sign top left instead of the "Max 120" chip */
             int sign = h.sign_limit > 0 && page;
-            phone_window_sign(h.sign_limit, h.sign_unit, h.sign_over, sign);
+            phone_window_dash(&h, sign && opt_dash);
             if (sign) {
                 if (h.sign_over) snprintf(hud_h.chip2, sizeof(hud_h.chip2), "%s", de ? "Zu schnell!" : "Too fast!");
                 else hud_h.chip2[0] = 0;
             }
         } else {
             phone_window_show(&h, 0, 0);
-            phone_window_sign(0, "", 0, 0);
+            phone_window_dash(&h, 0);
         }
         push_hud(&hud_h);
         phone_popup(&hud_h, de, job);
@@ -938,9 +988,17 @@ static void on_rebind(void *user, const char *key, uint32_t vk, uint32_t modifie
 
 static void on_setting(void *user, const char *key, int value) {
     (void)user;
-    if (!strcmp(key, "PhoneArrowKeys")) opt_arrow_keys = value != 0;
-    else if (!strcmp(key, "BusLinesNeedBus")) opt_bus_needs_bus = value != 0;
+    if (!strcmp(key, "BusLinesNeedBus")) opt_bus_needs_bus = value != 0;
     else if (!strcmp(key, "CareerExtras")) opt_extras = value != 0;
+    else if (!strcmp(key, "Complaints")) opt_complaints = value != 0;
+    else if (!strcmp(key, "RidePanel")) opt_dash = value != 0;
+    else if (!strcmp(key, "PhoneMouse")) {
+        opt_mouse = value != 0;
+        phone_window_mouse(opt_mouse, phone_clicked, phone_wheel);
+    } else if (!strcmp(key, "Voices")) {
+        opt_voices = value < 0 || value > 3 ? 0 : value;
+        apply_voices();
+    }
     else if (!strcmp(key, "AutoNavigation")) {
         opt_nav = value != 0;
         AcquireSRWLockExclusive(&lock);
@@ -949,7 +1007,7 @@ static void on_setting(void *user, const char *key, int value) {
     } else if (!strcmp(key, "BusInAutoshow")) opt_bus_autoshow = value != 0;
     else if (!strcmp(key, "TimeLimit")) opt_time_limit = value;
     else if (!strcmp(key, "Language")) opt_language = value;
-    else if (!strcmp(key, "PhoneStyle")) opt_phone_style = value;
+    else if (!strcmp(key, "PhoneStyle")) opt_phone_style = value >= 0 && value < TS_THEMES ? value : 0;
     save_settings();
 }
 
@@ -997,20 +1055,20 @@ static void page_open(void *user, const char *page_key) {
             static const char *const types_de[TS_P_KINDS] = {"Normal", "Gemütlich", "Eilig", "Autofan", "VIP", "Geschäftskunde", "Hochzeitspaar", "Ausflug"};
             static const char *const types_en[TS_P_KINDS] = {"Normal", "Relaxed", "In a hurry", "Car fan", "VIP", "Business", "Wedding", "Day trip"};
             snprintf(descs[i], sizeof(descs[i]), "%s (%s) %s %s %s. %s %d:%02d, %s %d %s.", ts_passenger_name(o->passenger),
-                     (de ? types_de : types_en)[o->ptype >= 0 && o->ptype < TS_P_KINDS ? o->ptype : 0], de ? "wartet bei" : "waits at", ts_places[o->pickup].name,
+                     (de ? types_de : types_en)[o->ptype >= 0 && o->ptype < TS_P_KINDS ? o->ptype : 0], de ? "wartet bei" : "waits at", ts_place_name(&c, o->pickup),
                      de ? "und möchte dorthin" : "and wants to go there", de ? "Zeitlimit" : "Time limit", (int)o->limit_s / 60,
                      (int)o->limit_s % 60, de ? "höchstens" : "at most", ts_speed_shown(&c, o->max_kmh), ts_speed_unit(&c));
-            ROW(offer_keys[i], ts_places[o->dest].name, v, descs[i], FH2_ROW_NORMAL);
+            ROW(offer_keys[i], ts_place_name(&c, o->dest), v, descs[i], FH2_ROW_NORMAL);
         }
         if (!c.offer_count) ROW(NULL, de ? "Keine Anfragen: erst losfahren" : "No requests: drive first", "", NULL, FH2_ROW_DIM);
         static const char *const line_keys[3] = {"line0", "line1", "line2"};
         ROW(NULL, de ? "Buslinien" : "Bus lines", "", NULL, FH2_ROW_HEADING);
         for (unsigned i = 0; i < ts_line_count && i < 3; ++i) {
-            snprintf(d, sizeof(d), "%s %s · %s", de ? "Linie" : "Line", ts_lines[i].number, ts_lines[i].title);
+            snprintf(d, sizeof(d), "%s %s · %s", de ? "Linie" : "Line", ts_lines[i].number, ts_line_title(&c, i));
             int locked = c.bus_needs_bus && c.car_kind != TS_CAR_BUS;
             snprintf(v, sizeof(v), "%s", locked ? (de ? "Bus nötig" : "needs the bus") : "");
             if (!locked) snprintf(v, sizeof(v), "%u %s", ts_lines[i].stop_count, de ? "Halte" : "stops");
-            snprintf(descs[4 + i], sizeof(descs[4 + i]), "%s: %s. %s", de ? "Start" : "Start", ts_places[ts_lines[i].stops[0]].name,
+            snprintf(descs[4 + i], sizeof(descs[4 + i]), "%s: %s. %s", de ? "Start" : "Start", ts_place_name(&c, ts_lines[i].stops[0]),
                      locked ? (de ? "Geht nur im Bus des Spiels (PG Bus)." : "Only in the game's bus (PG Bus).")
                             : (c.imperial ? (de ? "Höchstens 50 mph." : "At most 50 mph.") : (de ? "Höchstens 80 km/h." : "At most 80 km/h.")));
             ROW(line_keys[i], d, v, descs[4 + i], locked ? FH2_ROW_DIM : FH2_ROW_NORMAL);
@@ -1070,21 +1128,41 @@ static void add_rows(void) {
 
     memset(&s, 0, sizeof(s));
     s.size = sizeof(s);
-    s.key = "CareerExtras";
-    s.label = TR("row.CareerExtras.label", "Reputation, specials, wishes");
-    s.description = TR("row.CareerExtras.description",
-                       "On: reputation changes pay and requests, VIPs and special rides appear, passengers make wishes. Off: like 0.3.");
-    s.value = opt_extras;
+    s.key = "RidePanel";
+    s.label = TR("row.RidePanel.label", "Ride panel by the speedometer");
+    s.description = TR("row.RidePanel.description",
+                       "While a passenger rides: speed limit, G-meter (stay inside the circle), time left, the passenger's mood and wish, bottom right. Its place: RidePanelRight / RidePanelBottom in TransportSim.ini.");
+    s.value = opt_dash;
     s.on_change = on_setting;
     api->add_setting(mod, &s);
 
     memset(&s, 0, sizeof(s));
     s.size = sizeof(s);
-    s.key = "PhoneArrowKeys";
-    s.label = TR("row.PhoneArrowKeys.label", "Phone with arrow keys");
-    s.description = TR("row.PhoneArrowKeys.description",
-                       "While the phone is open: Up/Down = choose, Enter = take, Backspace = close; these keys then do nothing in the game.");
-    s.value = opt_arrow_keys;
+    s.key = "PhoneMouse";
+    s.label = TR("row.PhoneMouse.label", "Phone with the mouse");
+    s.description = TR("row.PhoneMouse.description",
+                       "While the phone is open: click a tab to open it, click an entry to pick it, click it again to take it; the wheel scrolls. Clicks on the phone don't reach the game.");
+    s.value = opt_mouse;
+    s.on_change = on_setting;
+    api->add_setting(mod, &s);
+
+    memset(&s, 0, sizeof(s));
+    s.size = sizeof(s);
+    s.key = "Complaints";
+    s.label = TR("row.Complaints.label", "Passenger complaints");
+    s.description = TR("row.Complaints.description",
+                       "On: passengers say something about harsh braking, speeding, crashes or being late. Off: they stay quiet about it, but the rating still counts.");
+    s.value = opt_complaints;
+    s.on_change = on_setting;
+    api->add_setting(mod, &s);
+
+    memset(&s, 0, sizeof(s));
+    s.size = sizeof(s);
+    s.key = "CareerExtras";
+    s.label = TR("row.CareerExtras.label", "Reputation, specials, wishes");
+    s.description = TR("row.CareerExtras.description",
+                       "On: reputation changes pay and requests, VIPs and special rides appear, passengers make wishes. Off: like 0.3.");
+    s.value = opt_extras;
     s.on_change = on_setting;
     api->add_setting(mod, &s);
 
@@ -1103,6 +1181,21 @@ static void add_rows(void) {
         s.on_change = on_setting;
         api->add_setting(mod, &s);
 
+        const char *voices[4] = {TR("row.Voices.choice.0", "Off"), TR("row.Voices.choice.1", "Quiet"),
+                                 TR("row.Voices.choice.2", "Normal"), TR("row.Voices.choice.3", "Loud")};
+        memset(&s, 0, sizeof(s));
+        s.size = sizeof(s);
+        s.key = "Voices";
+        s.label = TR("row.Voices.label", "Passenger voices (experimental)");
+        s.description = TR("row.Voices.description",
+                           "Passengers read their lines out loud with the Windows speech voices (German: Hedda, English: David or Zira). They sound robotic. Off by default.");
+        s.kind = FH2_SETTING_CHOICE;
+        s.choices = voices;
+        s.choice_count = 4;
+        s.value = opt_voices;
+        s.on_change = on_setting;
+        api->add_setting(mod, &s);
+
         const char *languages[3] = {TR("row.Language.choice.0", "Game"), "Deutsch", "English"};
         memset(&s, 0, sizeof(s));
         s.size = sizeof(s);
@@ -1117,16 +1210,17 @@ static void add_rows(void) {
         s.on_change = on_setting;
         api->add_setting(mod, &s);
 
-        const char *styles[4] = {TR("row.PhoneStyle.choice.0", "Night"), TR("row.PhoneStyle.choice.1", "Light"),
-                                 TR("row.PhoneStyle.choice.2", "Festival"), TR("row.PhoneStyle.choice.3", "HUD list")};
+        const char *styles[TS_THEMES] = {TR("row.PhoneStyle.choice.0", "Night"), TR("row.PhoneStyle.choice.1", "Light"),
+                                         TR("row.PhoneStyle.choice.2", "Festival"), TR("row.PhoneStyle.choice.3", "Ocean"),
+                                         "Carbon", "Riviera", "Gold"};
         memset(&s, 0, sizeof(s));
         s.size = sizeof(s);
         s.key = "PhoneStyle";
         s.label = TR("row.PhoneStyle.label", "Phone design");
-        s.description = TR("row.PhoneStyle.description", "How the phone looks. HUD list: the old list in the HUD instead of the phone.");
+        s.description = TR("row.PhoneStyle.description", "How the phone looks.");
         s.kind = FH2_SETTING_CHOICE;
         s.choices = styles;
-        s.choice_count = 4;
+        s.choice_count = TS_THEMES;
         s.value = opt_phone_style;
         s.on_change = on_setting;
         api->add_setting(mod, &s);
@@ -1280,6 +1374,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     log_line("%s %s, platform %s (API %u)", MOD_NAME, MOD_VERSION, api->platform_version, api->api_version);
 
     load_settings();
+    if (opt_voices > 0) apply_voices();
     save_settings(); /* the INI shows every setting */
     ts_init(&core, (uint32_t)GetTickCount() ^ (uint32_t)GetCurrentProcessId() * 2654435761u, language_german());
     load_stats();
@@ -1296,6 +1391,8 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     HANDLE keys = CreateThread(NULL, 0, keys_thread, NULL, 0, NULL);
     if (keys) CloseHandle(keys);
     phone_window_start(log_line);
+    phone_window_mouse(opt_mouse, phone_clicked, phone_wheel);
+    phone_window_dash_place(opt_dash_right, opt_dash_bottom);
     HANDLE thread = CreateThread(NULL, 0, worker, NULL, 0, NULL);
     if (thread) CloseHandle(thread);
     else log_line("could not start the worker thread");

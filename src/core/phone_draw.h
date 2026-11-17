@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include "jobs.h"
 
-enum { TS_THEME_NIGHT = 0, TS_THEME_LIGHT, TS_THEME_FESTIVAL, TS_THEMES };
+enum { TS_THEME_NIGHT = 0, TS_THEME_LIGHT, TS_THEME_FESTIVAL, TS_THEME_OCEAN, TS_THEME_CARBON, TS_THEME_RIVIERA, TS_THEME_GOLD, TS_THEMES };
 
 enum { TS_TEXT_LEFT = 0, TS_TEXT_CENTER, TS_TEXT_RIGHT };
 
@@ -20,6 +20,13 @@ typedef struct {
     int wrap;         /* nonzero: word-wrapped from the box's top, up to its height */
 } TsPhoneText;
 
+/* where the mouse can click on the drawn phone: a tab (tab >= 0) or an entry (row: its TsHud row, row2: its second line, -1 none) */
+#define TS_PHONE_HITS 16
+typedef struct {
+    int x, y, w, h; /* pixels of the buffer */
+    int tab, row, row2;
+} TsPhoneHit;
+
 typedef struct {
     uint32_t *px;     /* w*h pixels, 0xAARRGGBB, top row first; must start all zero */
     int w, h;
@@ -27,6 +34,8 @@ typedef struct {
     /* the width in pixels the text needs (t->w, t->x and t->align are ignored); NULL = estimated */
     int (*measure)(void *user, const TsPhoneText *t);
     void *user;
+    TsPhoneHit *hits; /* NULL = not wanted; else room for TS_PHONE_HITS, hit_count set by the drawing */
+    int hit_count;
 } TsPhoneCanvas;
 
 /* the buffer's size at this scale (1 = a 1080-line picture), shadow margin included */
@@ -43,5 +52,22 @@ const char *ts_theme_name(int theme, int german);
 void ts_sign_size(float scale, int *w, int *h);
 void ts_sign_draw(int number, const char *unit, int flash, float scale, TsPhoneCanvas *cv);
 void ts_sign_finish(float scale, TsPhoneCanvas *cv); /* after the texts: premultiplied alpha, a soft shadow */
+
+/* The ride panel by the speedometer (0.4.2): the speed-limit sign, the G-meter (a circle: inside = the passenger is
+   fine, the dot = how hard you brake, accelerate and corner), the time left and the passenger's mood, the wish. */
+void ts_dash_size(float scale, int *w, int *h);
+void ts_dash_draw(const TsHud *h, float scale, TsPhoneCanvas *cv);
+void ts_dash_finish(float scale, TsPhoneCanvas *cv); /* after the texts */
+
+/* The passengers' lines in an own window (0.4.2), for when the platform's HUD layer is off: the newest at the bottom. */
+#define TS_FEED_LINES 3
+typedef struct {
+    char name[64];
+    char text[TS_TEXT];
+    int style; /* as TsEvent.style */
+} TsFeedLine;
+void ts_feed_size(float scale, int *w, int *h);
+void ts_feed_draw(const TsFeedLine *lines, int n, float scale, TsPhoneCanvas *cv);
+void ts_feed_finish(float scale, TsPhoneCanvas *cv); /* after the texts */
 
 #endif

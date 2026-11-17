@@ -6,6 +6,7 @@
 #include "lines.h"
 #include "phone_draw.h"
 #include "bus_sql.h"
+#include "people.h"
 #include <stdlib.h>
 #include <math.h>
 #include <stdio.h>
@@ -423,6 +424,14 @@ static void record_text(void *user, const TsPhoneText *t) {
     l->count++;
 }
 
+/* about as wide as the preview's DejaVu font (wider than Segoe UI), so the previews don't cut texts the game shows */
+static int measure_like_preview(void *user, const TsPhoneText *t) {
+    (void)user;
+    int n = 0;
+    for (const unsigned char *p = (const unsigned char *)t->utf8; *p; ++p) n += (*p & 0xC0) != 0x80;
+    return (int)(n * t->size * (t->weight >= 600 ? 0.72f : 0.62f) + 0.5f);
+}
+
 static void draw_one(const TsHud *h, int theme, const char *name) {
     float scale = 1.0f;
     int w, hh;
@@ -437,7 +446,7 @@ static void draw_one(const TsHud *h, int theme, const char *name) {
         log.json = fopen(path, "w");
         if (log.json) fprintf(log.json, "{\"w\":%d,\"h\":%d,\"texts\":[\n", w, hh);
     }
-    TsPhoneCanvas cv = {px, w, hh, record_text, NULL, &log};
+    TsPhoneCanvas cv = {px, w, hh, record_text, measure_like_preview, &log, NULL, 0};
     ts_phone_draw(h, theme, scale, "18:56", &cv);
     ts_phone_finish(theme, scale, &cv);
     CHECK(log.count >= 8 && log.outside == 0, "%s theme %d: %d texts, %d outside", name, theme, log.count, log.outside);
@@ -788,18 +797,21 @@ static void test_phone_draw(void) {
     wait_s(&c, 0.5f, 0);
     ts_phone_toggle(&c);
     static const char *const names[TS_TABS] = {"rides", "bus", "account", "shop", "settings"};
-    static const char *const sl[7][2] = {{"Handy-Design", "Nacht"}, {"Sprache", "Spiel"}, {"Zeitlimits", "Normal"},
+    static const char *const sl[8][2] = {{"Handy-Design", "Nacht"}, {"Sprache", "Spiel"}, {"Zeitlimits", "Normal"}, {"Fahrgäste meckern", "An"},
                                          {"Navigation automatisch", "An"}, {"Ruf, Sonderfahrten, Wünsche", "An"},
-                                         {"Buslinien nur im Bus", "An"}, {"Handy mit Pfeiltasten", "An"}};
-    c.setting_count = 7;
-    for (int i = 0; i < 7; ++i) {
-        snprintf(c.setting_label[i], sizeof(c.setting_label[i]), "%s", sl[i][0]);
-        snprintf(c.setting_value[i], sizeof(c.setting_value[i]), "%s", sl[i][1]);
-    }
+                                         {"Buslinien nur im Bus", "An"}, {"Stimmen (Versuch)", "Aus"}};
+    static const char *const sl_en[8][2] = {{"Phone design", "Night"}, {"Language", "Game"}, {"Time limits", "Normal"}, {"Passenger complaints", "On"},
+                                            {"Auto GPS", "On"}, {"Reputation, specials, wishes", "On"},
+                                            {"Bus lines need the bus", "On"}, {"Voices (experimental)", "Off"}};
+    c.setting_count = 8;
     c.wallet = 7400;
     c.upgrades = 1u << TS_SHOP_DISPATCH;
     for (int de = 0; de < 2; ++de) {
         c.german = de;
+        for (int i = 0; i < 8; ++i) {
+            snprintf(c.setting_label[i], sizeof(c.setting_label[i]), "%s", (de ? sl : sl_en)[i][0]);
+            snprintf(c.setting_value[i], sizeof(c.setting_value[i]), "%s", (de ? sl : sl_en)[i][1]);
+        }
         for (int tab = 0; tab < TS_TABS; ++tab) {
             c.phone_tab = tab, c.phone_sel = tab == TS_TAB_RIDES ? 1 : 0;
             TsHud h;
@@ -816,10 +828,16 @@ static void test_phone_draw(void) {
     TsHud h;
     ts_hud(&c, &h);
     for (int t = 0; t < TS_THEMES; ++t) draw_one(&h, t, "job_de");
+    c.german = 0, c.imperial = 1;
+    ts_hud(&c, &h);
+    for (int t = 0; t < TS_THEMES; ++t) draw_one(&h, t, "job_en");
 }
 
 /* an English game shows miles: the limit in mph (rounded to 5), the chip, the sign and the distances */
 void format_km(const TsCore *c, char *out, size_t size, float metres);
+void say(TsCore *c, int style, int kind, int force);
+void complain(TsCore *c, int kind);
+void toast(TsCore *c, int icon, int sound, const char *title, const char *text);
 static void sign_one(int number, const char *unit, int flash, const char *name) {
     int w, hh;
     ts_sign_size(1.0f, &w, &hh);
@@ -833,7 +851,7 @@ static void sign_one(int number, const char *unit, int flash, const char *name) 
         log.json = fopen(path, "w");
         if (log.json) fprintf(log.json, "{\"w\":%d,\"h\":%d,\"texts\":[\n", w, hh);
     }
-    TsPhoneCanvas cv = {px, w, hh, record_text, NULL, &log};
+    TsPhoneCanvas cv = {px, w, hh, record_text, NULL, &log, NULL, 0};
     ts_sign_draw(number, unit, flash, 1.0f, &cv);
     ts_sign_finish(1.0f, &cv);
     CHECK(log.count >= 1 && log.outside == 0, "%s: %d texts, %d outside", name, log.count, log.outside);
@@ -891,9 +909,327 @@ static void test_imperial_and_sign(void) {
     ts_hud(&c, &h);
     CHECK(h.sign_over, "sign flashes when too fast");
     car.vel[0] = 0.0f;
+    /* what passengers say about the limit is in mph too (Marvin's game: "75 km/h" in 0.4.1's first build) */
+    TsEvent ev[TS_MAX_EVENTS];
+    ts_take_events(&c, ev, TS_MAX_EVENTS);
+    int mph_lines = 0, kmh_lines = 0;
+    for (int i = 0; i < 40; ++i) {
+        say(&c, 0, L_SPEEDING, 1);
+        int k = ts_take_events(&c, ev, TS_MAX_EVENTS);
+        for (int e = 0; e < k; ++e) mph_lines += strstr(ev[e].text, " mph") != NULL, kmh_lines += strstr(ev[e].text, "km/h") != NULL;
+    }
+    CHECK(mph_lines > 0 && kmh_lines == 0, "passenger lines in mph: %d mph, %d km/h", mph_lines, kmh_lines);
     sign_one(lim, "mph", 0, "sign_mph");
     sign_one(120, "km/h", 0, "sign_kmh");
     sign_one(lim, "mph", 1, "sign_over");
+}
+
+/* place and bus line names follow the language: no German words in an English game */
+static void test_place_names(void) {
+    TsCore c;
+    ts_init(&c, 3u, 0);
+    int bad = 0;
+    for (unsigned i = 0; i < ts_place_count; ++i) {
+        const char *n = ts_place_name(&c, (int)i);
+        bad += !n[0] || strstr(n, "Treffpunkt") || strstr(n, "Landstra") || strstr(n, "Nizza");
+    }
+    CHECK(bad == 0, "English place names: %d still German", bad);
+    for (unsigned l = 0; l < ts_line_count; ++l) CHECK(strcmp(ts_line_title(&c, (int)l), ts_lines[l].title) != 0, "line %u has an English name", l + 1);
+    CHECK(!strcmp(ts_place_name(&c, 5), "Nice"), "Nizza is Nice: %s", ts_place_name(&c, 5));
+    c.german = 1;
+    for (unsigned i = 0; i < ts_place_count; ++i) CHECK(ts_place_name(&c, (int)i) == ts_places[i].name, "German keeps the name");
+    c.german = 0;
+    place_car(ts_places[0].pos);
+    wait_s(&c, 0.3f, 0);
+    ts_phone_toggle(&c);
+    TsHud h;
+    ts_hud(&c, &h);
+    int german_rows = 0;
+    for (int r = 0; r < h.row_count; ++r) german_rows += strstr(h.row_label[r], "Treffpunkt") != NULL || strstr(h.row_value[r], "Treffpunkt") != NULL;
+    german_rows += strstr(h.footer, "Treffpunkt") != NULL;
+    CHECK(h.row_count > 0 && german_rows == 0, "the phone's ride list is English");
+}
+
+/* 0.4.1 (Marvin: "the croissant line three times in three rides", "long lines are cut off") */
+static void dash_one(const TsHud *h, const char *name) {
+    int w, hh;
+    ts_dash_size(1.0f, &w, &hh);
+    uint32_t *px = calloc((size_t)w * hh, 4);
+    const char *dir = getenv("PHONE_PREVIEW");
+    char path[512];
+    TextLog log = {0};
+    log.w = w, log.h = hh;
+    if (dir) {
+        snprintf(path, sizeof(path), "%s/%s_0.json", dir, name);
+        log.json = fopen(path, "w");
+        if (log.json) fprintf(log.json, "{\"w\":%d,\"h\":%d,\"texts\":[\n", w, hh);
+    }
+    TsPhoneCanvas cv = {px, w, hh, record_text, measure_like_preview, &log, NULL, 0};
+    ts_dash_draw(h, 1.0f, &cv);
+    ts_dash_finish(1.0f, &cv);
+    CHECK(log.count >= 3 && log.outside == 0, "%s: %d texts, %d outside", name, log.count, log.outside);
+    CHECK((px[0] >> 24) == 0, "%s: corner clear", name);
+    int bad = 0;
+    for (int i = 0; i < w * hh; ++i) {
+        uint32_t a = px[i] >> 24, r = (px[i] >> 16) & 255, g = (px[i] >> 8) & 255, b = px[i] & 255;
+        bad += r > a || g > a || b > a;
+    }
+    CHECK(bad == 0, "%s: %d pixels not premultiplied", name, bad);
+    if (log.json) {
+        fprintf(log.json, "]}\n");
+        fclose(log.json);
+        snprintf(path, sizeof(path), "%s/%s_0.bgra", dir, name);
+        FILE *f = fopen(path, "wb");
+        if (f) fwrite(px, 4, (size_t)w * hh, f), fclose(f);
+    }
+    free(px);
+}
+
+static void test_ride_variety(void) {
+    TsCore c;
+    ts_init(&c, 77u, 1);
+    ts_set_car(&c, "LAM_MiuraP400_67");
+    static int used[1024];
+    memset(used, 0, sizeof(used));
+    int rides = 0, repeats = 0;
+    for (int r = 0; r < 12; ++r) {
+        place_car(ts_places[0].pos); /* always from the festival, where it repeated most */
+        wait_s(&c, 0.5f, 0);
+        ts_phone_toggle(&c);
+        ts_phone_accept(&c);
+        if (c.mode != TS_UBER) { ts_phone_toggle(&c); continue; }
+        rides++;
+        repeats += used[c.job.dest]++ > 0;
+        ts_cancel(&c);
+        c.phone_open = 0;
+    }
+    CHECK(rides >= 10 && repeats == 0, "12 rides from one place: %d taken, %d destinations again", rides, repeats);
+}
+
+static void test_feed_window(void) {
+    TsFeedLine l[3] = {{"Rosa", "Hi! I hope the air conditioning works.", 0},
+                       {"Rosa (thinks)", "Hm. That was a bit rough.", 0},
+                       {"Aylin", "It smells of tyres and candy floss here. Perfect. I could stay here all day long, honestly.", 2}};
+    int w, hh;
+    ts_feed_size(1.0f, &w, &hh);
+    uint32_t *px = calloc((size_t)w * hh, 4);
+    TextLog log = {0};
+    log.w = w, log.h = hh;
+    const char *dir = getenv("PHONE_PREVIEW");
+    char path[512];
+    if (dir) {
+        snprintf(path, sizeof(path), "%s/feed_0.json", dir);
+        log.json = fopen(path, "w");
+        if (log.json) fprintf(log.json, "{\"w\":%d,\"h\":%d,\"texts\":[\n", w, hh);
+    }
+    TsPhoneCanvas cv = {px, w, hh, record_text, measure_like_preview, &log, NULL, 0};
+    ts_feed_draw(l, 3, 1.0f, &cv);
+    ts_feed_finish(1.0f, &cv);
+    CHECK(log.count >= 7 && log.outside == 0, "feed: %d texts, %d outside", log.count, log.outside);
+    if (log.json) {
+        fprintf(log.json, "]}\n");
+        fclose(log.json);
+        snprintf(path, sizeof(path), "%s/feed_0.bgra", dir);
+        FILE *f = fopen(path, "wb");
+        if (f) fwrite(px, 4, (size_t)w * hh, f), fclose(f);
+    }
+    free(px);
+}
+
+static void test_quiet_passengers(void) {
+    TsCore c;
+    ts_init(&c, 21u, 1);
+    TsEvent ev[TS_MAX_EVENTS];
+    int said[2] = {0, 0}, thought[2] = {0, 0};
+    for (int type = 0; type < 2; ++type) {
+        c.mode = TS_UBER, c.job.passenger = 3, c.job.ptype = type == 0 ? TS_P_RELAXED : TS_P_HURRY;
+        for (int i = 0; i < 200; ++i) {
+            c.t += 60.0;
+            complain(&c, L_BRAKE);
+            int k = ts_take_events(&c, ev, TS_MAX_EVENTS);
+            for (int e = 0; e < k; ++e) {
+                if (strstr(ev[e].title, "(denkt)")) {
+                    thought[type]++;
+                    CHECK(ev[e].speaker == -1, "a thought isn't spoken");
+                } else {
+                    said[type]++;
+                }
+            }
+        }
+    }
+    CHECK(said[0] < 40 && thought[0] > 40, "relaxed: mostly quiet (said %d, thought %d of 200)", said[0], thought[0]);
+    CHECK(said[1] > 130, "in a hurry: says it (said %d of 200)", said[1]);
+}
+
+static void test_dash(void) {
+    TsCore c;
+    ts_init(&c, 5u, 0);
+    c.imperial = 1;
+    ts_set_car(&c, "LAM_MiuraP400_67");
+    place_car(ts_places[0].pos);
+    wait_s(&c, 0.5f, 0);
+    ts_phone_toggle(&c);
+    ts_phone_accept(&c);
+    c.stage = TS_UBER_TO_DEST;
+    c.leg_t = c.t;
+    c.car_ok = 1;
+    c.acc_long = -3.0f, c.acc_lat = 2.0f;
+    TsHud h;
+    ts_hud(&c, &h);
+    CHECK(h.g_on && !h.g_over && h.g_long < 0.0f, "G-meter on with a passenger, inside the circle (%.2f, %.2f)", (double)h.g_lat, (double)h.g_long);
+    dash_one(&h, "dash_ok");
+    c.acc_long = -8.0f, c.acc_lat = -1.0f;
+    snprintf(c.job.passenger >= 0 ? h.chip3 : h.chip3, sizeof(h.chip3), "%s", "");
+    ts_hud(&c, &h);
+    CHECK(h.g_over, "hard braking: outside the circle");
+    snprintf(h.chip3, sizeof(h.chip3), "%s", "Wish: a quick stop at the café");
+    dash_one(&h, "dash_over");
+    c.stage = TS_UBER_TO_PICKUP;
+    ts_hud(&c, &h);
+    CHECK(!h.g_on, "no G-meter before the passenger is in");
+}
+
+static void test_mouse_clicks(void) {
+    TsCore c;
+    ts_init(&c, 11u, 1);
+    ts_set_car(&c, "LAM_MiuraP400_67");
+    place_car(ts_places[0].pos);
+    wait_s(&c, 0.5f, 0);
+    ts_phone_toggle(&c);
+    TsHud h;
+    ts_hud(&c, &h);
+    /* the drawn phone says where its tabs and entries are */
+    int w, hh;
+    ts_phone_size(1.0f, &w, &hh);
+    static uint32_t px[1200 * 1600];
+    memset(px, 0, sizeof(uint32_t) * (size_t)w * hh);
+    TsPhoneHit hits[TS_PHONE_HITS];
+    TextLog log = {0};
+    log.w = w, log.h = hh;
+    TsPhoneCanvas cv = {px, w, hh, record_text, NULL, &log, hits, 0};
+    ts_phone_draw(&h, 0, 1.0f, "12:00", &cv);
+    int tabs = 0, entries = 0, inside = 1;
+    for (int i = 0; i < cv.hit_count; ++i) {
+        tabs += hits[i].tab >= 0, entries += hits[i].row >= 0;
+        inside &= hits[i].x >= 0 && hits[i].y >= 0 && hits[i].x + hits[i].w <= w && hits[i].y + hits[i].h <= hh;
+    }
+    CHECK(tabs == TS_TABS && entries >= c.offer_count && inside, "click areas: %d tabs, %d entries, inside %d", tabs, entries, inside);
+    /* a click on the second offer picks it, a second click takes it */
+    int row = -1, row2 = -1, seen = 0;
+    for (int i = 0; i < cv.hit_count; ++i)
+        if (hits[i].row >= 0 && seen++ == 1) row = hits[i].row, row2 = hits[i].row2;
+    ts_phone_click(&c, -1, row, row2);
+    CHECK(c.phone_sel == 1 && c.mode == TS_IDLE, "first click picks the 2nd offer (sel %d, mode %d)", c.phone_sel, c.mode);
+    ts_phone_click(&c, -1, row, row2);
+    CHECK(c.mode == TS_UBER, "second click takes it (mode %d)", c.mode);
+    ts_cancel(&c);
+    /* a tab */
+    c.phone_open = 1;
+    ts_phone_click(&c, TS_TAB_SHOP, -1, -1);
+    CHECK(c.phone_tab == TS_TAB_SHOP && c.phone_sel == 0, "tab click opens the shop (tab %d)", c.phone_tab);
+    /* a heading can't be picked */
+    int keep = c.phone_sel;
+    ts_phone_click(&c, -1, 0, -1);
+    CHECK(c.phone_sel == keep && c.mode == TS_IDLE, "a heading isn't picked");
+}
+
+static void test_complaints_switch(void) {
+    TsCore c;
+    ts_init(&c, 7u, 1);
+    TsEvent ev[TS_MAX_EVENTS];
+    c.complaints_off = 1;
+    static const int quiet[] = {L_BRAKE, L_CORNER, L_SPEEDING, L_CRASH, L_HURRY_NAG, L_LATE, L_BUS_CRASH, L_BUS_LATE};
+    int said = 0;
+    for (unsigned i = 0; i < sizeof(quiet) / sizeof(quiet[0]); ++i) {
+        c.t += 60.0;
+        say(&c, 3, quiet[i], 1);
+        said += ts_take_events(&c, ev, TS_MAX_EVENTS);
+    }
+    CHECK(said == 0, "complaints off: %d complaints still said", said);
+    c.t += 60.0;
+    say(&c, 0, L_SMALL_TALK, 1);
+    CHECK(ts_take_events(&c, ev, TS_MAX_EVENTS) > 0, "complaints off: small talk still comes");
+    c.t += 60.0;
+    say(&c, 1, L_BYE_GOOD, 1);
+    CHECK(ts_take_events(&c, ev, TS_MAX_EVENTS) > 0, "complaints off: goodbyes still come");
+    c.complaints_off = 0;
+    c.t += 60.0;
+    say(&c, 3, L_CRASH, 1);
+    CHECK(ts_take_events(&c, ev, TS_MAX_EVENTS) > 0, "complaints on: a crash gets a remark");
+    /* voices: each passenger line says who speaks, with a voice that fits the person */
+    CHECK(ts_people_female_count == ts_people_count, "a voice for every person: %u of %u", ts_people_female_count, ts_people_count);
+    c.mode = TS_UBER, c.job.passenger = 0, c.job.ptype = TS_P_HURRY;
+    c.t += 60.0;
+    say(&c, 0, L_SMALL_TALK, 1);
+    int k = ts_take_events(&c, ev, TS_MAX_EVENTS);
+    CHECK(k == 1 && ev[0].speaker == 0 && ev[0].voice_female == 1 && ev[0].voice_rate == 2,
+          "voice: Lena, female, in a hurry (speaker %d, female %d, rate %d)", k ? ev[0].speaker : -9, k ? ev[0].voice_female : -9, k ? ev[0].voice_rate : -9);
+    CHECK(k == 1 && ev[0].voice_pitch >= -10 && ev[0].voice_pitch <= 10, "voice pitch in range");
+    toast(&c, 0, 0, "Horizon Transit", "x");
+    k = ts_take_events(&c, ev, TS_MAX_EVENTS);
+    CHECK(k == 1 && ev[0].speaker == -1, "pop-ups aren't spoken");
+}
+
+static void test_no_repeats_and_feed(void) {
+    TsCore c;
+    ts_init(&c, 99u, 1);
+    /* a kind's lines all come once before any comes back */
+    int n = (int)ts_line_sets[L_SMALL_TALK].count;
+    CHECK(n >= 80, "small talk has %d lines", n);
+    static int seen[512];
+    memset(seen, 0, sizeof(seen));
+    TsEvent ev[TS_MAX_EVENTS];
+    int repeats = 0;
+    for (int i = 0; i < n; ++i) {
+        c.t += 16.0;
+        say(&c, 0, L_SMALL_TALK, 1);
+        int k = ts_take_events(&c, ev, TS_MAX_EVENTS);
+        for (int e = 0; e < k; ++e)
+            for (int j = 0; j < n; ++j)
+                if (!strcmp(ev[e].text, ts_line_sets[L_SMALL_TALK].lines[j].de)) repeats += seen[j]++ > 0;
+    }
+    CHECK(repeats == 0, "every small-talk line once before any repeats: %d repeats", repeats);
+    /* no line of any kind again within 5 minutes, even in a kind with few lines */
+    int early = 0;
+    double last_at[16] = {0};
+    for (int i = 0; i < 200; ++i) {
+        c.t += 15.0;
+        say(&c, 0, L_WISH_THANKS, 1);
+        int k = ts_take_events(&c, ev, TS_MAX_EVENTS);
+        for (int e = 0; e < k; ++e)
+            for (int j = 0; j < (int)ts_line_sets[L_WISH_THANKS].count && j < 16; ++j)
+                if (!strcmp(ev[e].text, ts_line_sets[L_WISH_THANKS].lines[j].de)) {
+                    if (last_at[j] > 0.0 && c.t - last_at[j] < 300.0 && (int)ts_line_sets[L_WISH_THANKS].count * 15 >= 300) early++;
+                    last_at[j] = c.t;
+                }
+    }
+    CHECK(early == 0, "no line again within 5 minutes: %d", early);
+    /* all lines together, people's stories included: over 1000 */
+    int total = 0;
+    for (int k = 0; k < L_KINDS; ++k) total += (int)ts_line_sets[k].count;
+    CHECK(total + 40 * TS_PERSON_LINES >= 1000, "lines: %d + stories %d", total, 40 * TS_PERSON_LINES);
+    CHECK(ts_line_slot(L_KINDS - 1, (int)ts_line_sets[L_KINDS - 1].count - 1) >= 0, "every line has a slot");
+    /* the feed: long lines split at spaces, nothing lost, every part short enough */
+    char parts[4][TS_TEXT];
+    const char *longline = "Ich hab mir vorgenommen, mehr Französisch zu lernen, und bisher kann ich genau ein Wort: Croissant.";
+    int np = ts_feed_split(longline, 52, parts, 4);
+    CHECK(np == 2, "long line in 2 parts: %d", np);
+    char joined[400] = "";
+    for (int i = 0; i < np; ++i) {
+        int chars = 0;
+        for (const unsigned char *p = (const unsigned char *)parts[i]; *p; ++p) chars += (*p & 0xC0) != 0x80;
+        CHECK(chars <= 52, "part %d has %d characters", i, chars);
+        if (i) strcat(joined, " ");
+        strcat(joined, parts[i]);
+    }
+    CHECK(!strcmp(joined, longline), "nothing lost: %s", joined);
+    CHECK(ts_feed_split("Kurz.", 52, parts, 4) == 1 && !strcmp(parts[0], "Kurz."), "a short line stays one");
+    /* every line of every kind fits in the event text */
+    int too_long = 0;
+    for (int k = 0; k < L_KINDS; ++k)
+        for (unsigned i = 0; i < ts_line_sets[k].count; ++i)
+            too_long += strlen(ts_line_sets[k].lines[i].de) > 150 || strlen(ts_line_sets[k].lines[i].en) > 150;
+    CHECK(too_long == 0, "%d lines too long", too_long);
 }
 
 int main(int argc, char **argv) {
@@ -923,6 +1259,14 @@ int main(int argc, char **argv) {
     test_shop_and_settings();
     test_phone_draw();
     test_imperial_and_sign();
+    test_place_names();
+    test_no_repeats_and_feed();
+    test_complaints_switch();
+    test_mouse_clicks();
+    test_dash();
+    test_quiet_passengers();
+    test_feed_window();
+    test_ride_variety();
     printf("%d checks, %d failures\n", checks, failures);
     return failures != 0;
 }

@@ -11,8 +11,10 @@
 #include "people.h"
 
 #define TS_MAX_EVENTS 16
+#define TS_LINE_SLOTS 4096   /* all passenger lines together (lines.c), at most */
+#define TS_LINE_REPEAT_S 300.0f /* a line said comes back after 5 minutes at the earliest */
 #define TS_PHONE_OFFERS 3
-#define TS_TEXT 96
+#define TS_TEXT 192 /* long passenger lines are split for the feed (ts_feed_split) */
 
 enum { TS_IDLE = 0, TS_UBER, TS_BUS };
 
@@ -32,7 +34,7 @@ enum { TS_WISH_NONE = 0, TS_WISH_SLOWER, TS_WISH_SMOOTH, TS_WISH_FASTER, TS_WISH
 
 /* the phone's tabs while no job runs */
 enum { TS_TAB_RIDES = 0, TS_TAB_BUS, TS_TAB_ACCOUNT, TS_TAB_SHOP, TS_TAB_SETTINGS, TS_TABS };
-#define TS_SETTING_ROWS 7
+#define TS_SETTING_ROWS 8
 
 /* what the company can buy (shop.c), bits of TsCore.upgrades */
 enum { TS_SHOP_DISPATCH = 0, TS_SHOP_ADS, TS_SHOP_COMFORT, TS_SHOP_BIGBUS, TS_SHOP_PREMIUM, TS_SHOP_ITEMS };
@@ -54,6 +56,8 @@ typedef struct {
     int kind;
     int icon, sound, style; /* style: 0 white, 1 green, 2 orange, 3 yellow (chat lines) */
     char title[TS_TEXT], text[TS_TEXT];
+    int speaker;            /* TS_EV_FEED: the person (ts_people index) who says it, -1 = not a passenger */
+    int voice_female, voice_pitch, voice_rate; /* for "Voices": pitch -10..10, rate -10..10 (SAPI's scales) */
 } TsEvent;
 
 /* one sample of the own car, world space, metres and metres per second */
@@ -80,8 +84,8 @@ typedef struct {
     int stars;                       /* 0..5, the corner chip's dots */
     int panel;                       /* the phone: the panel's rows and the bar under them (app name, tabs) */
     int row_count, row_selected;     /* row_selected -1 = none */
-    char row_label[8][64], row_value[8][48];
-    int row_heading[8];              /* 0 normal, 1 heading, 2 dim */
+    char row_label[9][64], row_value[9][48]; /* 9: the heading and 8 settings */
+    int row_heading[9];              /* 0 normal, 1 heading, 2 dim */
     int tab_count, tab;
     char tabs[TS_TABS][24];
     char line1[48], line2[72];
@@ -92,6 +96,9 @@ typedef struct {
     int sign_limit;                  /* the speed-limit sign while a passenger rides (in the shown unit), 0 = none */
     int sign_over;                   /* too fast now */
     char sign_unit[8];               /* "km/h" / "mph" */
+    int g_on;                        /* the G-meter while a passenger rides */
+    float g_lat, g_long;             /* sideways (+ right) and forward (+ gas, - braking), 1.0 = the passenger's limit */
+    int g_over;                      /* outside the circle now */
 } TsHud;
 
 typedef struct {
@@ -100,6 +107,10 @@ typedef struct {
     int bus_capacity;     /* virtual seats */
     float time_factor;    /* 1.0 = normal time limits */
     int bus_needs_bus;    /* bus lines only in the game's bus (PG_BUS_14) */
+    short recent_places[24];   /* 0.4.2: pickups and destinations of the last rides (place + 1, 0 = empty), avoided for new requests */
+    int recent_pos;
+    int thinking;         /* say(): the line is a thought (chat shows "Name (thinks)", no voice) */
+    int complaints_off;   /* 0.4.1 switch: passengers keep remarks about the driving to themselves (the rating still counts) */
     int extras_off;       /* 0.4 switch: no reputation effect on pay and requests, no special rides, no wishes */
     unsigned upgrades;    /* bought in the shop (saved): 1 << TS_SHOP_ */
     int imperial;         /* the game shows mph and miles (its Units option, or its language's): set by the glue */
@@ -142,7 +153,10 @@ typedef struct {
     int fan_happy_said;
     unsigned char met[TS_PEOPLE_MAX]; /* rides done with each person (saved); a regular is greeted as one */
     int story_said;                   /* lines of the passenger's own story told this ride */
-    unsigned char last_line[80]; /* per kind of line: the last one said, so it isn't said twice in a row */
+    unsigned char last_line[80]; /* unused since 0.4.1 (line_used_at) */
+    /* 0.4.1: every line once before any comes back, and none again within 5 minutes (index: ts_line_slot) */
+    float line_used_at[TS_LINE_SLOTS];   /* c->t + 1 when it was said last, 0 = not yet */
+    unsigned char line_uses[TS_LINE_SLOTS];
 
     /* bus */
     int line, stop_i, onboard, delivered, board_total;
@@ -212,6 +226,9 @@ void ts_phone_toggle(TsCore *c);
 void ts_phone_next(TsCore *c);
 void ts_phone_prev(TsCore *c);
 void ts_phone_tab(TsCore *c, int direction); /* -1 / +1: the tab to the left / right */
+/* a mouse click on the drawn phone: a tab (tab >= 0), or an entry by its TsHud rows (row, its second line row2 or -1).
+   The first click on an entry picks it, a click on the picked one takes it (like Enter). */
+void ts_phone_click(TsCore *c, int tab, int row, int row2);
 /* the driven car, by its media name ("LAM_MiuraP400_67"; NULL or "" = unknown) */
 void ts_set_car(TsCore *c, const char *media);
 void ts_phone_accept(TsCore *c);   /* phone open: accept the selected row; during a job: cancel (twice) */
@@ -244,6 +261,14 @@ int ts_has(const TsCore *c, int item);
 /* speeds as the game shows them: km/h, or mph rounded to 5 (75 mph for 120 km/h) */
 int ts_speed_shown(const TsCore *c, int kmh);
 const char *ts_speed_unit(const TsCore *c);
+/* a place's or a bus line's name in the player's language ("Nice · Spot 4" / "Nizza · Treffpunkt 4") */
+const char *ts_place_name(const TsCore *c, int place);
+const char *ts_line_title(const TsCore *c, int line);
+/* splits a chat line into parts of at most max_chars characters (UTF-8), at spaces; returns how many */
+int ts_feed_split(const char *text, int max_chars, char out[][TS_TEXT], int max_parts);
+/* the slot of a line in TsCore.line_used_at, -1 if the lines don't fit */
+int ts_line_is_complaint(int kind); /* 1: silenced by complaints_off */
+int ts_line_slot(int kind, int index);
 
 /* helpers shared with the glue */
 float ts_distance_xz(const float a[3], const float b[3]);

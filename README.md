@@ -5,18 +5,20 @@
 A ride-hailing and bus-line mod for **Forza Horizon 2 on PC**: take Uber-style rides and drive bus lines with virtual passengers who talk, remember you and rate your driving. Everything runs from a phone on the left of the screen (**F9**).
 One mod, one file (`TransportSim.dll`), for the [FH2 Mod Platform](https://github.com/Trinculo54/fh2-mod-platform). Texts in English and German.
 
-**[⬇ Download the latest version](../../releases/latest)** · current version: **0.4.1**
+**[⬇ Download the latest version](../../releases/latest)** · current version: **0.4.2**
 
 > Horizon Transit is new and in active development. The release list shows what is new.
 
-![The phone: rides, shop and account](docs/bilder/phone-0.4.png)
+![The phone: rides, bus lines, your company, shop, options and a ride, plus the speed-limit sign](docs/screenshots/horizon-transit-overview.png)
+
+<sub>Pictures drawn by the mod's own phone code (the preview tool uses a stand-in font). More in [docs/screenshots](docs/screenshots).</sub>
 
 ---
 
 ## What you get
 
 ### 🚕 Rides
-- **3 requests nearby** on the phone, short, medium and long, at 208 real places of the game (festival, towns, meeting points).
+- **3 requests nearby** on the phone, short, medium and long, at 208 real places of the game (festival, towns, meeting spots).
 - The game's **GPS** guides you to the pickup and on to the destination. Stop there and the passenger gets in or out.
 - **Satisfaction** from your driving: hard throttle, braking, cornering, speeding and crashes cost, calm driving pays back. Every passenger has a speed limit, shown as a sign top left (mph or km/h, as the game is set). **Pay and 1–5 stars** at the end.
 - **40 passengers with a life**: name, age, job and a story they tell bit by bit. Regulars know you, remember your last car and how the last ride went.
@@ -39,8 +41,8 @@ One mod, one file (`TransportSim.dll`), for the [FH2 Mod Platform](https://githu
 - **Statistics**: tips, punctuality, wishes, special rides, records.
 
 ### 📱 The phone
-- A drawn smartphone on the left, in 3 designs (Night, Light, Festival), or the old HUD list.
-- Tabs: Rides · Bus · Account · Shop · Options. Arrow keys, Enter and Backspace while it is open; all settings also in the phone.
+- A drawn smartphone on the left, in 7 designs (Night, Light, Festival, Ocean, Carbon, Riviera, Gold). Works with the arrow keys, a pad or the mouse.
+- Tabs: Rides · Bus · Account · Shop · Options. Arrow keys, Enter and Backspace while it is open; most settings also in the phone (Options).
 
 ---
 
@@ -78,7 +80,7 @@ All keys can be changed in Pause › MODS › YOUR MODS › Horizon Transit. LB 
 - The mod has its own money (company funds); there is no known safe way to change the game's credits.
 - The game's time of day and weather can't be read, so there is no demand by time or weather. Music and windows can't be controlled, so there are no wishes about them.
 - Distances and time limits are estimated (straight line × 1.35), not read from the GPS route.
-- The phone is its own window over the game: invisible in exclusive fullscreen (choose the HUD list then).
+- The phone is its own window over the game: invisible in exclusive fullscreen, so play windowed or borderless.
 - Cars from car packs have no data and count as normal cars without a group.
 - The traffic bus in the Autoshow is experimental: cameras, cockpit and driver may be missing. Don't buy or drive it online.
 - Not tested together with races and events during a job; cancel the job first.
@@ -99,7 +101,7 @@ All keys can be changed in Pause › MODS › YOUR MODS › Horizon Transit. LB 
 - Works well with **Gripline**, **[FH2 ANNA](https://github.com/qiangqiang101/FH2_ANNA)** and **[NitroSystem](https://github.com/qiangqiang101/NitroSystem)**
 
 ## Building and license
-`pip install ziglang==0.15.2`, then `python build.py`: it runs the logic tests (5805 checks) and makes `out/TransportSim.dll`. The game data tables are made by `tools/gen_stops.py` and `tools/gen_cars.py` from your own game files.
+`pip install ziglang==0.15.2`, then `python build.py`: it runs the logic tests (8007 checks) and makes `out/TransportSim.dll`. The game data tables are made by `tools/gen_stops.py` and `tools/gen_cars.py` from your own game files.
 GPL-3.0 (see [LICENSE](LICENSE)). Changes: [CHANGELOG.md](CHANGELOG.md) · plan of the ideas (German): [docs/ROADMAP_de.md](docs/ROADMAP_de.md).
 
 ## AI disclosure

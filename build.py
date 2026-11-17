@@ -43,7 +43,7 @@ def main():
     run([exe])
     # 2. Die DLL fuer das Spiel (Windows x64)
     run(zig + ["-target", "x86_64-windows-gnu", "-shared", "-O2", "-std=c11", "-Wall", "-Wextra", "-Isrc/core", "-Isrc",
-               "src/mod.c", "src/phone_window.c"] + CORE + ["-luser32", "-lgdi32", "-o", "out/TransportSim.dll"])
+               "src/mod.c", "src/phone_window.c", "src/voice.c"] + CORE + ["-luser32", "-lgdi32", "-lole32", "-o", "out/TransportSim.dll"])
     for junk in ("out/mod.lib", "out/TransportSim.lib"):
         if os.path.exists(os.path.join(ROOT, junk)):
             os.remove(os.path.join(ROOT, junk))

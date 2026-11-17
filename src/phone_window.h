@@ -14,6 +14,18 @@ void phone_window_show(const TsHud *h, int theme, int want);
 /* the speed-limit sign at the top left (number in the shown unit); want = 0 hides it. Shown only while the
    phone isn't. Any thread, cheap. */
 void phone_window_sign(int number, const char *unit, int over, int want);
+/* the mouse on the phone: enabled = clicks on the shown phone go to it (not to the game); click gets the tab or
+   the entry's rows (see ts_phone_click), wheel -1 up / +1 down. Both run on the window's thread. */
+typedef void (*PhoneClickFn)(int tab, int row, int row2);
+typedef void (*PhoneWheelFn)(int direction);
+void phone_window_mouse(int enabled, PhoneClickFn click, PhoneWheelFn wheel);
+/* the ride panel by the speedometer (sign, G-meter, time, mood, wish: ts_dash_draw); want = 0 hides it.
+   right/bottom: its distance from the picture's right and bottom edge, in pixels of a 1080p picture. */
+void phone_window_dash(const TsHud *h, int want);
+void phone_window_dash_place(int right, int bottom);
+/* a passenger's line in the own feed window (bottom left, above the minimap), for when the HUD layer is off;
+   it stays 8 s (longer for long lines), the newest 3 are shown */
+void phone_window_feed(const char *name, const char *text, int style);
 /* 1 while the window exists (else use the HUD list) */
 int phone_window_ok(void);
 /* 1 when the phone is on screen now */

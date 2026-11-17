@@ -370,3 +370,13 @@ const signed char ts_people_taste[][2] = {
     {TS_GROUP_HATCH, TS_GROUP_SALOON}, /* Zoe */
     {TS_GROUP_SMALL, TS_GROUP_SUPER}, /* Gabriel */
 };
+
+/* the voice each person gets when "Voices" is on: 1 a female voice, 0 a male one (same order as ts_people) */
+const unsigned char ts_people_female[] = {
+    1 /* Lena */, 0 /* Marco */, 1 /* Sophie */, 0 /* Luca */, 1 /* Emma */, 0 /* Jonas */, 1 /* Giulia */, 0 /* Pierre */,
+    1 /* Chloé */, 0 /* Matteo */, 1 /* Hannah */, 0 /* Noah */, 1 /* Elena */, 0 /* Felix */, 1 /* Camille */, 0 /* Antonio */,
+    1 /* Mia */, 0 /* Oskar */, 1 /* Sara */, 0 /* Tom */, 1 /* Lucie */, 0 /* Ben */, 1 /* Ines */, 0 /* Yusuf */,
+    1 /* Clara */, 0 /* David */, 1 /* Aylin */, 0 /* Henri */, 1 /* Nora */, 0 /* Kenji */, 1 /* Julia */, 0 /* Max */,
+    1 /* Rosa */, 0 /* Leon */, 1 /* Valentina */, 0 /* Erik */, 1 /* Amélie */, 0 /* Paul */, 1 /* Zoe */, 0 /* Gabriel */,
+};
+const unsigned ts_people_female_count = sizeof(ts_people_female);

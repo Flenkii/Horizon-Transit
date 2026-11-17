@@ -65,6 +65,7 @@ def main(d):
             lw = draw.textlength(s, font=f)
             x = t["x"] if t["align"] == 0 else t["x"] + (t["w"] - lw) / 2 if t["align"] == 1 else t["x"] + t["w"] - lw
             draw.text((x, t["y"] + t["h"] / 2), s, font=f, fill=col, anchor="lm")
+        out.save(base + "_alpha.png")  # see-through, for screenshots on any background
         # on a game-like grey backdrop
         bg = Image.new("RGBA", (w, h), (96, 110, 120, 255))
         bg.alpha_composite(out)

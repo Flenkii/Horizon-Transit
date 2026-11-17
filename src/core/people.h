@@ -17,5 +17,8 @@ extern const TsPerson ts_people[];
 extern const unsigned ts_people_count;
 /* [person][0] = the TS_GROUP_ they like, [1] = the one they don't */
 extern const signed char ts_people_taste[][2];
+/* [person]: 1 = a female voice (the "Voices" switch) */
+extern const unsigned char ts_people_female[];
+extern const unsigned ts_people_female_count;
 
 #endif

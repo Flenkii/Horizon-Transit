@@ -3,6 +3,7 @@
 #include "stops.h"
 #include "lines.h"
 #include "jobs_internal.h"
+#include "people.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -56,6 +57,19 @@ void event(TsCore *c, int kind, int icon, int sound, const char *title, const ch
     e->kind = kind, e->icon = icon, e->sound = sound;
     if (title) snprintf(e->title, sizeof(e->title), "%s", title);
     if (text) snprintf(e->text, sizeof(e->text), "%s", text);
+    e->speaker = -1;
+}
+
+/* how a person sounds with "Voices" on: younger a bit higher, older a bit lower, each person a little different */
+static void voice_of(const TsCore *c, int person, TsEvent *e) {
+    const TsPerson *p = &ts_people[person];
+    e->speaker = person;
+    e->voice_female = person < (int)ts_people_female_count ? ts_people_female[person] : person % 2 == 0;
+    int pitch = p->age < 25 ? 3 : p->age < 40 ? 1 : p->age < 55 ? 0 : -2;
+    pitch += (int)((unsigned)person * 7u % 3u) - 1;
+    e->voice_pitch = pitch < -10 ? -10 : pitch > 10 ? 10 : pitch;
+    int type = c->mode == TS_UBER ? c->job.ptype : TS_P_NORMAL;
+    e->voice_rate = type == TS_P_HURRY ? 2 : type == TS_P_RELAXED ? -1 : p->age >= 65 ? -1 : 0;
 }
 
 void toast(TsCore *c, int icon, int sound, const char *title, const char *text) {
@@ -71,9 +85,15 @@ void chat(TsCore *c, int style, const char *text, int force) {
     if (!force && c->t < c->chat_cooldown) return;
     c->chat_cooldown = c->t + 15.0;
     /* on the bus, one of the people on board speaks (a different one each time) */
-    const char *who = c->mode == TS_BUS ? ts_passenger_name(random_below(c, PASSENGER_COUNT)) : ts_passenger_name(c->job.passenger);
+    int person = c->mode == TS_BUS ? random_below(c, PASSENGER_COUNT) : (c->job.passenger % PASSENGER_COUNT + PASSENGER_COUNT) % PASSENGER_COUNT;
+    int before = c->event_count;
+    char who[64];
+    if (c->thinking) snprintf(who, sizeof(who), "%s %s", ts_passenger_name(person), T(c, "(denkt)", "(thinks)"));
+    else snprintf(who, sizeof(who), "%s", ts_passenger_name(person));
     event(c, TS_EV_FEED, 0, 0, who, text);
+    if (c->event_count == before) return; /* the queue was full */
     c->events[c->event_count - 1].style = style;
+    if (!c->thinking) voice_of(c, person, &c->events[c->event_count - 1]); /* a thought is read, not heard */
 }
 
 int ts_speed_shown(const TsCore *c, int kmh) {
@@ -86,6 +106,137 @@ const char *ts_speed_unit(const TsCore *c) {
     return c->imperial ? "mph" : "km/h";
 }
 
+/* ---- 0.4.1: which line of a kind comes next (Marvin: "the croissant line three times in three rides").
+   Every line of a kind is said once before any comes back (the fewest uses first), and a line said comes
+   back after TS_LINE_REPEAT_S at the earliest; only when every line of the kind was said in the last
+   5 minutes, the one said longest ago comes. */
+static unsigned line_base[L_KINDS + 1];
+static int line_base_done;
+
+static void make_line_slots(void) {
+    if (line_base_done) return;
+    unsigned at = 0;
+    for (int k = 0; k < L_KINDS; ++k) line_base[k] = at, at += ts_line_sets[k].count;
+    line_base[L_KINDS] = at;
+    line_base_done = 1;
+}
+
+int ts_line_slot(int kind, int index) {
+    make_line_slots();
+    if (kind < 0 || kind >= L_KINDS || index < 0 || index >= (int)ts_line_sets[kind].count) return -1;
+    unsigned slot = line_base[kind] + (unsigned)index;
+    return slot < TS_LINE_SLOTS ? (int)slot : -1;
+}
+
+static int pick_line(TsCore *c, int kind) {
+    if (kind < 0 || kind >= L_KINDS) return -1;
+    int count = (int)ts_line_sets[kind].count;
+    if (count <= 0) return -1;
+    float now = (float)c->t + 1.0f;
+    int fewest = 256, candidates = 0;
+    for (int i = 0; i < count; ++i) { /* the fewest uses among the lines not said in the last 5 minutes */
+        int s = ts_line_slot(kind, i);
+        if (s < 0) return random_below(c, count);
+        if (c->line_used_at[s] > 0.0f && now - c->line_used_at[s] < TS_LINE_REPEAT_S) continue;
+        if (c->line_uses[s] < fewest) fewest = c->line_uses[s], candidates = 0;
+        if (c->line_uses[s] == fewest) candidates++;
+    }
+    int pick = -1;
+    if (candidates > 0) {
+        int nth = random_below(c, candidates);
+        for (int i = 0; i < count && pick < 0; ++i) {
+            int s = ts_line_slot(kind, i);
+            if (c->line_used_at[s] > 0.0f && now - c->line_used_at[s] < TS_LINE_REPEAT_S) continue;
+            if (c->line_uses[s] == fewest && nth-- == 0) pick = i;
+        }
+    } else { /* all said in the last 5 minutes: the oldest */
+        float oldest = now + 1.0f;
+        for (int i = 0; i < count; ++i) {
+            int s = ts_line_slot(kind, i);
+            if (c->line_used_at[s] < oldest) oldest = c->line_used_at[s], pick = i;
+        }
+    }
+    int s = ts_line_slot(kind, pick);
+    c->line_used_at[s] = now;
+    if (c->line_uses[s] < 255) c->line_uses[s]++;
+    return pick;
+}
+
+/* the feed takes 64 characters a line: longer ones are split at spaces into several lines */
+int ts_feed_split(const char *text, int max_chars, char out[][TS_TEXT], int max_parts) {
+    int parts = 0;
+    const char *p = text ? text : "";
+    while (*p == ' ') ++p;
+    while (*p && parts < max_parts) {
+        /* the bytes of up to max_chars characters, cut at the last space if the rest doesn't fit */
+        const char *end = p, *space = NULL;
+        int chars = 0;
+        while (*end && chars < max_chars) {
+            if (*end == ' ') space = end;
+            ++end;
+            while ((*end & 0xC0) == 0x80) ++end; /* the rest of a UTF-8 letter */
+            ++chars;
+        }
+        if (*end && *end != ' ' && space && space > p) end = space;
+        size_t n = (size_t)(end - p);
+        if (n >= TS_TEXT) n = TS_TEXT - 1;
+        memcpy(out[parts], p, n);
+        out[parts][n] = 0;
+        ++parts;
+        p = end;
+        while (*p == ' ') ++p;
+    }
+    return parts;
+}
+
+/* Place names: the data has them in German ("Nizza · Treffpunkt 4", "Landstraße bei Nizza · 3"). In English:
+   "Nice · Spot 4", "Road near Nice · 3". Made once, the first time they're asked for. */
+#define TS_PLACES_MAX 512
+static char place_en[TS_PLACES_MAX][64];
+static int place_en_done;
+
+static void english_place(const char *de, char *out, size_t n) {
+    char tmp[64];
+    const char *rest = de;
+    size_t k = 0;
+    if (!strncmp(rest, "Landstraße bei ", 16)) {
+        k = (size_t)snprintf(tmp, sizeof(tmp), "Road near ");
+        rest += 16;
+    }
+    while (*rest && k + 1 < sizeof(tmp)) {
+        if (!strncmp(rest, "Nizza", 5)) {
+            k += (size_t)snprintf(tmp + k, sizeof(tmp) - k, "Nice");
+            rest += 5;
+        } else if (!strncmp(rest, "Treffpunkt", 10)) {
+            k += (size_t)snprintf(tmp + k, sizeof(tmp) - k, "Spot");
+            rest += 10;
+        } else tmp[k++] = *rest++;
+        if (k >= sizeof(tmp)) k = sizeof(tmp) - 1;
+    }
+    tmp[k] = 0;
+    snprintf(out, n, "%s", tmp);
+}
+
+static void make_place_names(void) { /* from ts_init, before the mod's threads run */
+    if (place_en_done) return;
+    for (unsigned i = 0; i < ts_place_count && i < TS_PLACES_MAX; ++i) english_place(ts_places[i].name, place_en[i], sizeof(place_en[i]));
+    place_en_done = 1;
+}
+
+const char *ts_place_name(const TsCore *c, int place) {
+    if (place < 0 || place >= (int)ts_place_count) return "";
+    if (c->german || place >= TS_PLACES_MAX) return ts_places[place].name;
+    make_place_names();
+    return place_en[place];
+}
+
+const char *ts_line_title(const TsCore *c, int line) {
+    static const char *const en[] = {"Festival Ring", "Coast Line", "Mountain Express", "Nice City Bus", "Castelletto Shuttle", "Vineyard Line"};
+    if (line < 0 || line >= (int)ts_line_count) return "";
+    if (c->german || line >= (int)(sizeof(en) / sizeof(en[0]))) return ts_lines[line].title;
+    return en[line];
+}
+
 int unit_kmh(const TsCore *c, int kmh) {
     return c->imperial ? (int)((float)ts_speed_shown(c, kmh) * 1.609344f + 0.5f) : kmh;
 }
@@ -95,14 +246,46 @@ int ride_max_kmh(const TsCore *c) {
 }
 
 /* a line of this kind (lines.c), never the same one twice in a row; {car} and {max} filled in */
+/* the remarks the "passenger complaints" switch silences: about the driving, being late, the car */
+int ts_line_is_complaint(int kind) {
+    switch (kind) {
+    case L_BRAKE: case L_CORNER: case L_ACCEL: case L_SPEEDING: case L_CRASH: case L_HURRY_NAG: case L_LATE:
+    case L_BUS_CRASH: case L_BUS_BRAKE: case L_BUS_CORNER: case L_BUS_SPEEDING: case L_BUS_LATE:
+    case L_DISLIKES_CAR: case L_REG_LAST_BAD: case L_WISH_FAILED: case L_THOUGHT:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* 0.4.2: not everyone says something about the driving. Each person is quiet, now-and-then or outspoken; the hurried
+   say it more often, the relaxed hardly ever. The rest keep it to themselves, and sometimes you see what they think. */
+int ts_outspoken(const TsCore *c, int person) {
+    if (c->mode == TS_UBER && c->job.ptype == TS_P_HURRY) return 2;
+    if (c->mode == TS_UBER && c->job.ptype == TS_P_RELAXED) return 0;
+    return (int)(((unsigned)person * 7u + 3u) % 3u);
+}
+
+void complain(TsCore *c, int kind) {
+    int person = (c->job.passenger % PASSENGER_COUNT + PASSENGER_COUNT) % PASSENGER_COUNT;
+    int o = c->mode == TS_BUS ? 1 : ts_outspoken(c, person);
+    float speak = o == 2 ? 0.8f : o == 1 ? 0.4f : 0.08f;
+    if (random_unit(c) < speak) {
+        say(c, 2, kind, 0);
+    } else if (random_unit(c) < 0.5f) {
+        c->thinking = 1;
+        say(c, 0, L_THOUGHT, 0);
+        c->thinking = 0;
+    }
+}
+
 void say(TsCore *c, int style, int kind, int force) {
     if (kind < 0 || kind >= L_KINDS || !ts_line_sets[kind].count) return;
     if (!force && c->t < c->chat_cooldown) return;
+    if (c->complaints_off && ts_line_is_complaint(kind)) return;
     const TsLineSet *set = &ts_line_sets[kind];
-    int pick = random_below(c, (int)set->count);
-    if (set->count > 1 && kind < (int)sizeof(c->last_line) && pick == c->last_line[kind] - 1)
-        pick = (pick + 1 + random_below(c, (int)set->count - 1)) % (int)set->count;
-    if (kind < (int)sizeof(c->last_line)) c->last_line[kind] = (unsigned char)(pick + 1);
+    int pick = pick_line(c, kind);
+    if (pick < 0) return;
     const char *line = c->german ? set->lines[pick].de : set->lines[pick].en;
     char text[TS_TEXT], number[16];
     size_t n = 0;
@@ -118,7 +301,7 @@ void say(TsCore *c, int style, int kind, int force) {
         else snprintf(lastcar, sizeof(lastcar), "%s", car->model);
     } else snprintf(lastcar, sizeof(lastcar), "%s", T(c, "Auto", "car"));
     snprintf(limit, sizeof(limit), "%d", ts_speed_shown(c, c->wish_limit));
-    const char *place = c->wish_place >= 0 && c->wish_place < (int)ts_place_count ? ts_places[c->wish_place].name : "";
+    const char *place = c->wish_place >= 0 && c->wish_place < (int)ts_place_count ? ts_place_name(c, c->wish_place) : "";
     while (*line && n + 1 < sizeof(text)) {
         const char *fill = NULL;
         if (!strncmp(line, "{car}", 5)) fill = c->car_name[0] ? c->car_name : T(c, "Auto", "car"), line += 5;
@@ -129,8 +312,9 @@ void say(TsCore *c, int style, int kind, int force) {
         else if (!strncmp(line, "{limit}", 7)) fill = limit, line += 7;
         else if (!strncmp(line, "{place}", 7)) fill = place, line += 7;
         if (fill) {
+            int speed = fill == number || fill == limit;
             while (*fill && n + 1 < sizeof(text)) text[n++] = *fill++;
-            if ((fill == number || fill == limit) && c->imperial && !strncmp(line, " km/h", 5)) { /* the lines say km/h */
+            if (speed && c->imperial && !strncmp(line, " km/h", 5)) { /* the lines say km/h */
                 for (const char *u = " mph"; *u && n + 1 < sizeof(text); ++u) text[n++] = *u;
                 line += 5;
             }
@@ -140,6 +324,21 @@ void say(TsCore *c, int style, int kind, int force) {
     }
     text[n] = 0;
     chat(c, style, text, force);
+}
+
+/* where the car is, for what passengers talk about: the festival, a town, the open country (-1: in between) */
+static int where_talk(const TsCore *c) {
+    if (!c->car_ok) return -1;
+    float best = 1e9f;
+    int kind = -1;
+    for (unsigned i = 0; i < ts_place_count; ++i) {
+        if (ts_places[i].kind != TS_PLACE_FESTIVAL && ts_places[i].kind != TS_PLACE_OUTPOST) continue;
+        float d = ts_distance_xz(c->car.pos, ts_places[i].pos);
+        if (d < best) best = d, kind = ts_places[i].kind;
+    }
+    if (best < 1200.0f) return kind == TS_PLACE_FESTIVAL ? L_FESTIVAL_TALK : L_TOWN_TALK; /* outposts are the towns */
+    if (best > 2500.0f) return L_COUNTRY_TALK;
+    return -1;
 }
 
 /* the passenger tells the next bit of their own story; a regular goes on where they stopped last time */
@@ -222,6 +421,8 @@ void format_time(char *out, size_t size, double seconds) {
 /* ------------------------------------------------------------------ setup */
 
 void ts_init(TsCore *c, uint32_t seed, int german) {
+    make_place_names();
+    make_line_slots();
     memset(c, 0, sizeof(*c));
     c->rng = seed ? seed : 0x12345678u;
     c->german = german;
@@ -327,10 +528,9 @@ void ts_car_sample(TsCore *c, float dt, const TsCar *car) {
         else c->n_speeding++;
         if (c->t >= c->complain_at && c->t >= c->chat_cooldown) { /* a remark at most every 35 s */
             c->complain_at = c->t + 35.0;
-            if (harsh == 2) say(c, 2, bus ? L_BUS_BRAKE : L_BRAKE, 0);
-            else if (harsh == 3) say(c, 2, bus ? L_BUS_CORNER : L_CORNER, 0);
-            else if (harsh == 4) say(c, 2, bus ? L_BUS_SPEEDING : L_SPEEDING, 0);
-            else say(c, 2, L_ACCEL, 0);
+            int kind = harsh == 2 ? (bus ? L_BUS_BRAKE : L_BRAKE) : harsh == 3 ? (bus ? L_BUS_CORNER : L_CORNER)
+                     : harsh == 4 ? (bus ? L_BUS_SPEEDING : L_SPEEDING) : L_ACCEL;
+            complain(c, kind);
         }
     }
     c->was_harsh = harsh != 0;
@@ -361,13 +561,43 @@ float place_distance(int a, int b) {
     return ts_distance_xz(ts_places[a].pos, ts_places[b].pos);
 }
 
+static int place_recent(const TsCore *c, int place) {
+    for (int k = 0; k < 24; ++k)
+        if (c->recent_places[k] == place + 1) return 1;
+    return 0;
+}
+
+static void remember_place(TsCore *c, int place) {
+    if (place < 0) return;
+    c->recent_places[c->recent_pos % 24] = (short)(place + 1);
+    c->recent_pos = (c->recent_pos + 1) % 24;
+}
+
+/* the area of a place: its name up to " · " ("Nizza · Treffpunkt 4" -> "Nizza") */
+static int same_area(int a, int b) {
+    const char *na = ts_places[a].name, *nb = ts_places[b].name;
+    const char *da = strstr(na, " · "), *db = strstr(nb, " · ");
+    size_t la = da ? (size_t)(da - na) : strlen(na), lb = db ? (size_t)(db - nb) : strlen(nb);
+    return la == lb && !strncmp(na, nb, la);
+}
+
+/* 0.4.2: more variety: places of the last rides are left out, and a destination in another area than the pickup
+   (`not_this`) is preferred, when enough others are in range */
 int pick_place(TsCore *c, const float from[3], float min_m, float max_m, int not_this) {
-    int candidates[512], n = 0;
+    int candidates[512], n = 0, fresh[512], nf = 0, away[512], na = 0;
     for (unsigned i = 0; i < ts_place_count && n < 512; ++i) {
         if ((int)i == not_this) continue;
         float d = ts_distance_xz(from, ts_places[i].pos);
-        if (d >= min_m && d <= max_m) candidates[n++] = (int)i;
+        if (d >= min_m && d <= max_m) {
+            candidates[n++] = (int)i;
+            if (!place_recent(c, (int)i)) {
+                fresh[nf++] = (int)i;
+                if (not_this >= 0 && !same_area((int)i, not_this)) away[na++] = (int)i;
+            }
+        }
     }
+    if (na >= 2 && random_unit(c) < 0.75f) return away[random_below(c, na)];
+    if (nf >= 2) return fresh[random_below(c, nf)];
     if (!n) { /* nothing in range: the nearest one that is far enough */
         int best = -1;
         float best_d = 1e9f;
@@ -438,6 +668,8 @@ static void make_offers(TsCore *c) {
         int slot = count == 2 ? i + 1 : i; /* with two requests: the medium and the long one */
         float min_trip = slot == 0 ? 1200.0f : slot == 1 ? 2500.0f : 4000.0f; /* short, medium, long */
         float max_trip = slot == 0 ? 2600.0f : slot == 1 ? 4500.0f : 8000.0f;
+        if (slot == 2 && random_unit(c) < 0.3f) min_trip = 7000.0f, max_trip = 14000.0f; /* now and then a trip across the map */
+        if (slot == 0 && random_unit(c) < 0.25f) min_trip = 600.0f, max_trip = 1400.0f;  /* or a quick hop */
         o->dest = pick_place(c, ts_places[o->pickup].pos, min_trip, max_trip, o->pickup);
         if (o->dest < 0) break;
         o->pickup_m = ts_distance_xz(c->car.pos, ts_places[o->pickup].pos);
@@ -537,7 +769,40 @@ void ts_phone_tab(TsCore *c, int direction) {
     c->phone_sel = 0;
 }
 
+static int hits_selected(const TsHud *h, int row, int row2) {
+    return h->row_selected >= 0 && (row == h->row_selected || (row2 >= 0 && row2 == h->row_selected));
+}
+
+void ts_phone_click(TsCore *c, int tab, int row, int row2) {
+    if (!c->phone_open) return;
+    TsHud h;
+    if (c->mode != TS_IDLE) { /* during a job only the picked entry (cancel) answers, with its usual second press */
+        ts_hud(c, &h);
+        if (row >= 0 && hits_selected(&h, row, row2)) ts_phone_accept(c);
+        return;
+    }
+    if (tab >= 0) {
+        if (tab < TS_TABS && tab != c->phone_tab) c->phone_tab = tab, c->phone_sel = 0;
+        return;
+    }
+    if (row < 0) return;
+    ts_hud(c, &h);
+    if (hits_selected(&h, row, row2)) {
+        ts_phone_accept(c);
+        return;
+    }
+    int keep = c->phone_sel, n = tab_items(c, c->phone_tab);
+    for (int s = 0; s < n; ++s) {
+        c->phone_sel = s;
+        ts_hud(c, &h);
+        if (hits_selected(&h, row, row2)) return;
+    }
+    c->phone_sel = keep; /* not an entry that can be picked (a heading, the account's figures) */
+}
+
 static void start_uber(TsCore *c, const TsOffer *o) {
+    remember_place(c, o->pickup);
+    remember_place(c, o->dest);
     c->mode = TS_UBER;
     c->job = *o;
     c->stage = TS_UBER_TO_PICKUP;
@@ -555,7 +820,7 @@ static void start_uber(TsCore *c, const TsOffer *o) {
     wish_ride_start(c);
     set_nav(c, ts_places[o->pickup].pos);
     char text[TS_TEXT];
-    snprintf(text, sizeof(text), "%s: %s", ts_passenger_name(o->passenger), ts_places[o->pickup].name);
+    snprintf(text, sizeof(text), "%s: %s", ts_passenger_name(o->passenger), ts_place_name(c, o->pickup));
     toast(c, TS_ICON_ROADS, TS_SOUND_NOTIFY, T(c, "Fahrt angenommen", "Ride accepted"), text);
 }
 
@@ -578,7 +843,7 @@ static void start_bus(TsCore *c, int line) {
     tt_start(c);
     set_nav(c, first->pos);
     char text[TS_TEXT];
-    snprintf(text, sizeof(text), "%s %s · %s", T(c, "Linie", "Line"), ts_lines[line].number, first->name);
+    snprintf(text, sizeof(text), "%s %s · %s", T(c, "Linie", "Line"), ts_lines[line].number, ts_place_name(c, ts_lines[line].stops[0]));
     toast(c, TS_ICON_ROADS, TS_SOUND_NOTIFY, T(c, "Buslinie gestartet", "Bus line started"), text);
     if (away > TS_ARRIVE_RADIUS) {
         char d[24];
@@ -745,7 +1010,7 @@ static void uber_step(TsCore *c) {
             char text[TS_TEXT], km[24], time[16];
             format_km(c, km, sizeof(km), c->job.trip_m);
             format_time(time, sizeof(time), c->job.limit_s);
-            snprintf(text, sizeof(text), "%s · ~%s · %s %s", ts_places[c->job.dest].name, km, T(c, "Limit", "limit"), time);
+            snprintf(text, sizeof(text), "%s · ~%s · %s %s", ts_place_name(c, c->job.dest), km, T(c, "Limit", "limit"), time);
             toast(c, TS_ICON_ROADS, TS_SOUND_NOTIFY, T(c, "Fahrgast eingestiegen", "Passenger picked up"), text);
             static const int greet[TS_P_KINDS] = {L_GREET_NORMAL, L_GREET_RELAXED, L_GREET_HURRY, L_GREET_FAN,
                                                   L_GREET_VIP, L_GREET_BUSINESS, L_GREET_WEDDING, L_GREET_TOURIST};
@@ -801,8 +1066,16 @@ static void uber_step(TsCore *c) {
                 if (kind >= 0) say(c, kind == L_REG_LAST_BAD || kind == L_DISLIKES_CAR ? 3 : kind == L_LIKES_CAR ? 1 : 0, kind, 0);
             } else if (type >= TS_P_VIP && random_unit(c) < 0.5f) {
                 say(c, 0, special_talk[type - TS_P_VIP], 0);
-            } else if (!(type != TS_P_HURRY && random_unit(c) < 0.65f && tell(c))) {
-                say(c, 0, type == TS_P_RELAXED && random_unit(c) < 0.6f ? L_RELAXED_TALK : L_SMALL_TALK, 0);
+            } else if (!(type != TS_P_HURRY && random_unit(c) < 0.55f && tell(c))) {
+                /* 0.4.1: what they talk about depends on who they are and where you drive */
+                int where = where_talk(c);
+                float r = random_unit(c);
+                int kind = L_SMALL_TALK;
+                if (where >= 0 && r < 0.3f) kind = where;
+                else if (type == TS_P_RELAXED && r < 0.7f) kind = L_RELAXED_TALK;
+                else if (type == TS_P_HURRY && r < 0.75f) kind = L_HURRY_TALK;
+                else if (type == TS_P_FAN && r < 0.7f) kind = L_FAN_TALK;
+                say(c, 0, kind, 0);
             }
             c->talk_at = c->t + 40.0 + 35.0 * random_unit(c);
         }
@@ -875,7 +1148,7 @@ static void bus_leg_to_next(TsCore *c) {
     set_nav(c, ts_places[to].pos);
     char text[TS_TEXT], km[24];
     format_km(c, km, sizeof(km), est);
-    snprintf(text, sizeof(text), "%s · ~%s", ts_places[to].name, km);
+    snprintf(text, sizeof(text), "%s · ~%s", ts_place_name(c, to), km);
     toast(c, TS_ICON_ROADS, 0, T(c, "Nächste Haltestelle", "Next stop"), text);
     if (c->onboard > 0 && random_unit(c) < 0.35f) say(c, 0, L_BUS_TALK, 0);
 }
@@ -944,7 +1217,7 @@ static void bus_step(TsCore *c) {
                 format_time(late, sizeof(late), delay);
                 snprintf(text + used, sizeof(text) - used, " · +%s", late);
             }
-            toast(c, TS_ICON_NONE, TS_SOUND_NOTIFY, stop->name, text);
+            toast(c, TS_ICON_NONE, TS_SOUND_NOTIFY, ts_place_name(c, line->stops[c->stop_i]), text);
         }
         return;
     }
@@ -993,7 +1266,7 @@ int ts_take_events(TsCore *c, TsEvent *out, int max) {
 /* ------------------------------------------------------------------ HUD */
 
 void row(TsHud *h, const char *label, const char *value, int heading) {
-    if (h->row_count >= 8) return;
+    if (h->row_count >= 9) return;
     snprintf(h->row_label[h->row_count], sizeof(h->row_label[0]), "%s", label);
     snprintf(h->row_value[h->row_count], sizeof(h->row_value[0]), "%s", value ? value : "");
     h->row_heading[h->row_count] = heading;
@@ -1042,6 +1315,14 @@ void ts_hud(const TsCore *c, TsHud *h) {
             h->sign_limit = ts_speed_shown(c, max);
             h->sign_over = over;
             snprintf(h->sign_unit, sizeof(h->sign_unit), "%s", ts_speed_unit(c));
+            /* the G-meter: the same limits ts_car_sample counts as harsh (gas 4.5, braking 6.5, sideways 6.5 / a fan 8 m/s^2),
+               rounded to 0.05 so the picture changes only when the dot moves */
+            float lat_limit = c->mode == TS_UBER && c->job.ptype == TS_P_FAN ? 8.0f : 6.5f;
+            float gl = c->acc_lat / lat_limit, gf = c->acc_long > 0.0f ? c->acc_long / 4.5f : c->acc_long / 6.5f;
+            h->g_on = c->car_ok;
+            h->g_lat = roundf(clampf(gl, -1.6f, 1.6f) * 20.0f) / 20.0f;
+            h->g_long = roundf(clampf(gf, -1.6f, 1.6f) * 20.0f) / 20.0f;
+            h->g_over = h->g_lat * h->g_lat + h->g_long * h->g_long > 1.0f;
         }
         double left = 0.0;
         int timed = 0;
@@ -1112,7 +1393,7 @@ void ts_hud(const TsCore *c, TsHud *h) {
                 const TsOffer *o = &c->offers[i];
                 format_km(c, km, sizeof(km), o->trip_m);
                 snprintf(b, sizeof(b), "%s · %d €", km, o->pay);
-                row(h, ts_places[o->dest].name, b, 0);
+                row(h, ts_place_name(c, o->dest), b, 0);
                 snprintf(a, sizeof(a), "%s · %s", ts_passenger_name(o->passenger), type_name(c, o->ptype));
                 snprintf(b, sizeof(b), "max %d %s", ts_speed_shown(c, o->max_kmh), ts_speed_unit(c));
                 row(h, a, b, 2);
@@ -1125,13 +1406,13 @@ void ts_hud(const TsCore *c, TsHud *h) {
                 format_km(c, pk, sizeof(pk), o->pickup_m);
                 format_time(time, sizeof(time), o->limit_s);
                 snprintf(h->footer, sizeof(h->footer), "%s %s · %s %s · %s", T(c, "Abholung in", "Pickup"), pk,
-                         T(c, "Zeitlimit", "time limit"), time, ts_places[o->pickup].name);
+                         T(c, "Zeitlimit", "time limit"), time, ts_place_name(c, o->pickup));
             }
         } else if (c->phone_tab == TS_TAB_BUS) {
             int locked = c->bus_needs_bus && c->car_kind != TS_CAR_BUS;
             row(h, locked ? T(c, "Nur mit dem Bus", "Bus only") : T(c, "Bus bereit", "Bus ready"), NULL, 2);
             for (unsigned i = 0; i < ts_line_count && h->row_count < 8; ++i) {
-                snprintf(a, sizeof(a), "%s %s · %s", T(c, "Linie", "Line"), ts_lines[i].number, ts_lines[i].title);
+                snprintf(a, sizeof(a), "%s %s · %s", T(c, "Linie", "Line"), ts_lines[i].number, ts_line_title(c, i));
                 if (locked) snprintf(b, sizeof(b), "%s", T(c, "Bus nötig", "needs the bus"));
                 else snprintf(b, sizeof(b), "%u %s", ts_lines[i].stop_count, T(c, "Halte", "stops"));
                 row(h, a, b, locked ? 2 : 0);
@@ -1167,13 +1448,13 @@ void ts_hud(const TsCore *c, TsHud *h) {
             const TsPerson *who = &ts_people[c->job.passenger % PASSENGER_COUNT];
             snprintf(a, sizeof(a), "%s, %d · %s · %s", who->name, who->age, c->german ? who->job_de : who->job_en, type_name(c, c->job.ptype));
             row(h, a, NULL, 2);
-            row(h, T(c, "Abholort", "Pickup"), ts_places[c->job.pickup].name, 0);
-            row(h, T(c, "Ziel", "Destination"), ts_places[c->job.dest].name, 0);
+            row(h, T(c, "Abholort", "Pickup"), ts_place_name(c, c->job.pickup), 0);
+            row(h, T(c, "Ziel", "Destination"), ts_place_name(c, c->job.dest), 0);
             snprintf(b, sizeof(b), "%d €", c->job.pay);
             row(h, T(c, "Bezahlung (erwartet)", "Pay (expected)"), b, 0);
         } else {
             const TsLine *l = &ts_lines[c->line];
-            snprintf(a, sizeof(a), "%s %s · %s", T(c, "Linie", "Line"), l->number, l->title);
+            snprintf(a, sizeof(a), "%s %s · %s", T(c, "Linie", "Line"), l->number, ts_line_title(c, c->line));
             row(h, a, NULL, 2);
             snprintf(b, sizeof(b), "%d / %u · %s", c->stop_i + 1, l->stop_count, ts_places[l->stops[c->stop_i]].name);
             row(h, T(c, "Haltestelle", "Stop"), b, 0);

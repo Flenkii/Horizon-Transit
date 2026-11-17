@@ -2,6 +2,7 @@
    are in units of a 1080-line picture and multiplied by the scale. */
 #include "phone_draw.h"
 #include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -35,12 +36,28 @@ static const Theme themes[TS_THEMES] = {
     /* Festival: a sunset behind frosted cards, yellow */
     {0x2A1440, 0x8D5BC0, 0x08040C, 0x5B2A9E, 0xF0457A, 0xFFFFFF, 0xFFFFFF, 46, 0xFFFFFF, 0xF3DDF1, 0x2A1238,
      0xFFD21F, 0xFFAA00, 0xFFFFFF, 40, 0xFFE27A, 0xFFFFFF},
+    /* Ozean / Ocean: deep blue, cyan into turquoise */
+    {0x13263A, 0x5C86AD, 0x04080D, 0x0B3A5C, 0x061524, 0x12324D, 0x1F4A6B, 255, 0xEEF7FF, 0x8FB3CC, 0x04121F,
+     0x22D3EE, 0x2DD4BF, 0x12324D, 255, 0xFFC531, 0x5EEAD4},
+    /* Carbon: matt black, racing red */
+    {0x202020, 0x6A6A6A, 0x050505, 0x1A1A1A, 0x0A0A0A, 0x232323, 0x333333, 255, 0xF2F2F2, 0x9A9A9A, 0xFFFFFF,
+     0xE10600, 0xFF4D2E, 0x262626, 255, 0xFFC531, 0xFF5A4A},
+    /* Riviera: warm sand and the Mediterranean's teal */
+    {0xD9CBB0, 0xF6EEDF, 0x0B0B0D, 0xFBF5EA, 0xF1E6D2, 0xFFFDF8, 0xE6D9C2, 255, 0x2B2620, 0x857868, 0xFFFFFF,
+     0x0E9F9A, 0x1FB5C9, 0xEDE2CE, 255, 0xC77700, 0x0B8A86},
+    /* Gold: black and gold */
+    {0x1A1712, 0x8C7A4E, 0x050403, 0x16130E, 0x080705, 0x221E16, 0x3A3324, 255, 0xF7F1E3, 0xA89C82, 0x1A1408,
+     0xE8B530, 0xF6D57A, 0x221E16, 255, 0xFFD666, 0xF0C860},
 };
 
 const char *ts_theme_name(int theme, int german) {
     switch (theme) {
     case TS_THEME_LIGHT: return german ? "Hell" : "Light";
     case TS_THEME_FESTIVAL: return "Festival";
+    case TS_THEME_OCEAN: return german ? "Ozean" : "Ocean";
+    case TS_THEME_CARBON: return "Carbon";
+    case TS_THEME_RIVIERA: return "Riviera";
+    case TS_THEME_GOLD: return "Gold";
     default: return german ? "Nacht" : "Night";
     }
 }
@@ -175,10 +192,19 @@ typedef struct {
 
 static const char *pick(int german, const char *de, const char *en) { return german ? de : en; }
 
+static void add_hit(Ctx *c, float ux, float uy, float uw, float uh, int tab, int row, int row2) {
+    TsPhoneCanvas *cv = c->cv;
+    if (!cv->hits || cv->hit_count >= TS_PHONE_HITS) return;
+    TsPhoneHit *h = &cv->hits[cv->hit_count++];
+    h->x = (int)(ux * c->s), h->y = (int)(uy * c->s), h->w = (int)(uw * c->s + 0.5f), h->h = (int)(uh * c->s + 0.5f);
+    h->tab = tab, h->row = row, h->row2 = row2;
+}
+
 void ts_phone_draw(const TsHud *h, int theme, float scale, const char *clock, TsPhoneCanvas *cv) {
     Ctx c = {cv, scale, &themes[theme >= 0 && theme < TS_THEMES ? theme : 0]};
     const Theme *t = c.t;
     float X = PH_M, Y = PH_M;
+    cv->hit_count = 0;
     /* body: shiny rim, the frame, the black bezel, the screen */
     box(&c, X, Y, PH_W, PH_H, PH_R, t->rim, t->frame, 1, 255);
     fill(&c, X + 2.5f, Y + 2.5f, PH_W - 5, PH_H - 5, PH_R - 2.5f, t->frame);
@@ -221,6 +247,7 @@ void ts_phone_draw(const TsHud *h, int theme, float scale, const char *clock, Ts
         int on = i == h->tab;
         if (on) box(&c, tx, y + 2, tw, 28, 14, t->accent, t->accent2, 0, 255);
         text(&c, h->tabs[i], tx, y + 2, tw, 28, tsize, on ? 700 : 600, on ? t->sel_text : t->dim, TS_TEXT_CENTER);
+        if (h->tab_count > 1) add_hit(&c, tx, y, tw, 32, i, -1, -1);
         tx += tw;
     }
     y += 44;
@@ -257,6 +284,7 @@ void ts_phone_draw(const TsHud *h, int theme, float scale, const char *clock, Ts
         }
         int sel = r == h->row_selected || (en->sub_row >= 0 && en->sub_row == h->row_selected);
         float ch = en->sub_row >= 0 ? 56 : 42;
+        add_hit(&c, x0, y, cw, ch, -1, r, en->sub_row);
         if (sel) {
             box(&c, x0, y, cw, ch, 13, t->accent, t->accent2, 0, 255);
         } else {
@@ -400,5 +428,201 @@ void ts_sign_finish(float scale, TsPhoneCanvas *cv) {
                 rgb = (rr > m ? m : rr) << 16 | (g > m ? m : g) << 8 | (b > m ? m : b);
             }
             *d = (uint32_t)ai << 24 | rgb;
+        }
+}
+
+/* ------------------------------------------------------------------ the ride panel by the speedometer */
+
+#define DS_W 316.0f
+#define DS_H 128.0f
+#define DS_M 8.0f
+#define DS_R 20.0f
+
+void ts_dash_size(float scale, int *w, int *h) {
+    *w = (int)ceilf((DS_W + 2 * DS_M) * scale);
+    *h = (int)ceilf((DS_H + 2 * DS_M) * scale);
+}
+
+/* a ring: a disc of `outer` with one of `inner` cut out, in the colour of what's under it */
+static void ring(Ctx *c, float cx, float cy, float r, float width, uint32_t col, uint32_t inside) {
+    fill(c, cx - r, cy - r, 2 * r, 2 * r, r, col);
+    fill(c, cx - r + width, cy - r + width, 2 * (r - width), 2 * (r - width), r - width, inside);
+}
+
+void ts_dash_draw(const TsHud *h, float scale, TsPhoneCanvas *cv) {
+    Ctx c = {cv, scale, &themes[0]};
+    const uint32_t bg = 0x12151C;
+    float x = DS_M, y = DS_M;
+    fill(&c, x, y, DS_W, DS_H, DS_R, bg);
+
+    /* the sign */
+    float d = 92, sx = x + 14, sy = y + (DS_H - 18 - d) / 2;
+    if (h->sign_limit > 0) {
+        fill(&c, sx, sy, d, d, d / 2, 0xD71920);
+        fill(&c, sx + 10, sy + 10, d - 20, d - 20, d / 2 - 10, h->sign_over ? 0xFFD21F : 0xFFFFFF);
+        char n[16];
+        snprintf(n, sizeof(n), "%d", h->sign_limit);
+        float size = h->sign_limit >= 100 ? 28.0f : 34.0f;
+        int has_unit = h->sign_unit[0] != 0;
+        text(&c, n, sx, sy + (has_unit ? 19 : 25), d, 40, size, 700, 0x111111, TS_TEXT_CENTER);
+        if (has_unit) text(&c, h->sign_unit, sx, sy + 57, d, 14, 11, 700, 0x333333, TS_TEXT_CENTER);
+    }
+
+    /* the G-meter */
+    float gr = 46, gcx = sx + d + 16 + gr, gcy = sy + d / 2;
+    uint32_t edge = h->g_over ? 0xFF3B3B : 0x2FD27A;
+    fill(&c, gcx - gr, gcy - gr, 2 * gr, 2 * gr, gr, 0x0A0C11);
+    float inner = gr / 1.45f; /* the passenger's limit; the outer ring is 1.45 times that */
+    ring(&c, gcx, gcy, inner + 1.5f, 3.0f, edge, 0x0A0C11);
+    ring(&c, gcx, gcy, inner * 0.5f + 0.75f, 1.5f, 0x2A2F3A, 0x0A0C11);
+    fill(&c, gcx - gr + 6, gcy - 0.75f, 2 * gr - 12, 1.5f, 0.75f, 0x2A2F3A);
+    fill(&c, gcx - 0.75f, gcy - gr + 6, 1.5f, 2 * gr - 12, 0.75f, 0x2A2F3A);
+    ring(&c, gcx, gcy, gr, 1.5f, 0x3A4050, 0x0A0C11);
+    /* the cross was drawn over the inner circles: put the limit ring back on top */
+    ring(&c, gcx, gcy, inner + 1.5f, 3.0f, edge, 0x0A0C11);
+    fill(&c, gcx - inner * 0.5f - 0.75f, gcy - 0.75f, inner + 1.5f, 1.5f, 0.75f, 0x2A2F3A);
+    fill(&c, gcx - 0.75f, gcy - inner * 0.5f - 0.75f, 1.5f, inner + 1.5f, 0.75f, 0x2A2F3A);
+    text(&c, "G", gcx + gr - 16, gcy - gr + 2, 14, 14, 10, 700, 0x6C7385, TS_TEXT_CENTER);
+    if (h->g_on) {
+        float gx = h->g_lat, gy = h->g_long; /* braking moves the dot up, gas down, like a race car's display */
+        float len = sqrtf(gx * gx + gy * gy), maxlen = 1.38f;
+        if (len > maxlen) gx *= maxlen / len, gy *= maxlen / len;
+        float px = gcx + gx * inner, py = gcy + gy * inner;
+        uint32_t dot = h->g_over ? 0xFF3B3B : 0xFFFFFF;
+        fill(&c, px - 7, py - 7, 14, 14, 7, 0x000000);
+        fill(&c, px - 5.5f, py - 5.5f, 11, 11, 5.5f, dot);
+    }
+
+    /* the time left and the mood: "4:30 · 92%" */
+    float tx = gcx + gr + 12, tw = x + DS_W - 12 - tx;
+    char a[32] = "", b[32] = "";
+    const char *dot = strstr(h->corner, " · ");
+    if (dot) {
+        snprintf(a, sizeof(a), "%.*s", (int)(dot - h->corner), h->corner);
+        snprintf(b, sizeof(b), "%s", dot + strlen(" · "));
+    } else {
+        snprintf(b, sizeof(b), "%s", h->corner);
+    }
+    int de = h->german;
+    if (a[0]) {
+        text(&c, de ? "ZEIT" : "TIME", tx, sy + 2, tw, 14, 10, 700, 0x8A91A3, TS_TEXT_LEFT);
+        text(&c, a, tx, sy + 14, tw, 30, 24, 700, a[0] == '+' ? 0xFF5A4A : 0xFFFFFF, TS_TEXT_LEFT);
+    }
+    if (b[0]) {
+        int mood = atoi(b);
+        text(&c, de ? "FAHRGAST" : "PASSENGER", tx, sy + 50, tw, 14, 10, 700, 0x8A91A3, TS_TEXT_LEFT);
+        text(&c, b, tx, sy + 62, tw, 30, 24, 700, mood >= 75 ? 0x2FD27A : mood >= 50 ? 0xFFC531 : 0xFF5A4A, TS_TEXT_LEFT);
+    }
+
+    /* the wish or the timetable along the bottom */
+    if (h->chip3[0]) text(&c, h->chip3, x + 14, y + DS_H - 24, DS_W - 28, 18, 12.5f, 700, 0xFFD21F, TS_TEXT_LEFT);
+}
+
+void ts_dash_finish(float scale, TsPhoneCanvas *cv) {
+    float s = scale, x = DS_M * s, y = DS_M * s, w = DS_W * s, hh = DS_H * s, r = DS_R * s, spread = DS_M * s;
+    const float body = 0.9f; /* the panel lets a little of the game through */
+    for (int py = 0; py < cv->h; ++py)
+        for (int px = 0; px < cv->w; ++px) {
+            uint32_t *dp = &cv->px[py * cv->w + px];
+            float fx = px + 0.5f, fy = py + 0.5f;
+            float cov = rbox_cover(fx, fy, x, y, w, hh, r);
+            float sc = 0.0f;
+            if (cov < 1.0f) {
+                float cx = x + w * 0.5f, cy = y + hh * 0.5f + 3 * s;
+                float qx = fabsf(fx - cx) - (w * 0.5f - r), qy = fabsf(fy - cy) - (hh * 0.5f - r);
+                float ox = qx > 0 ? qx : 0, oy = qy > 0 ? qy : 0;
+                float dist = sqrtf(ox * ox + oy * oy) - r;
+                if (dist < spread) {
+                    float k = 1.0f - clampf(dist / spread, 0, 1);
+                    sc = 0.35f * k * k;
+                }
+            }
+            float a = cov * body + (1.0f - cov) * sc;
+            int ai = (int)(a * 255.0f + 0.5f);
+            if (ai <= 0) {
+                *dp = 0;
+                continue;
+            }
+            uint32_t rgb = *dp & 0xFFFFFF;
+            uint32_t rr = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
+            rr = (uint32_t)(rr * body + 0.5f), g = (uint32_t)(g * body + 0.5f), b = (uint32_t)(b * body + 0.5f);
+            uint32_t m = (uint32_t)ai;
+            rgb = (rr > m ? m : rr) << 16 | (g > m ? m : g) << 8 | (b > m ? m : b);
+            *dp = (uint32_t)ai << 24 | rgb;
+        }
+}
+
+/* ------------------------------------------------------------------ the passengers' lines (own window) */
+
+#define FD_W 560.0f
+#define FD_ROW 27.0f
+#define FD_GAP 6.0f
+#define FD_ROWS 9 /* 3 lines of up to 3 rows */
+#define FD_H (FD_ROWS * FD_ROW + TS_FEED_LINES * FD_GAP)
+
+static struct { float x, y, w, h; } feed_boxes[TS_FEED_LINES];
+static int feed_box_count;
+
+void ts_feed_size(float scale, int *w, int *h) {
+    *w = (int)ceilf((FD_W + 4) * scale);
+    *h = (int)ceilf((FD_H + 4) * scale);
+}
+
+void ts_feed_draw(const TsFeedLine *lines, int n, float scale, TsPhoneCanvas *cv) {
+    Ctx c = {cv, scale, &themes[0]};
+    static const uint32_t name_col[4] = {0x8FD3FF, 0x2FD27A, 0xFF9A3C, 0xFFD21F};
+    feed_box_count = 0;
+    float y = FD_H; /* from the bottom up: the newest line last in `lines`, lowest on screen */
+    for (int i = n - 1; i >= 0 && feed_box_count < TS_FEED_LINES; --i) {
+        char parts[3][TS_TEXT];
+        int k = ts_feed_split(lines[i].text, 58, parts, 3);
+        if (k <= 0) continue;
+        float nw = measure(&c, lines[i].name, 15, 700) + 12;
+        if (nw > 200) nw = 200;
+        float tw = 0;
+        for (int p = 0; p < k; ++p) {
+            float w = measure(&c, parts[p], 15, 600);
+            if (w > tw) tw = w;
+        }
+        float bw = 14 + nw + tw + 14, bh = k * FD_ROW + 8;
+        if (bw > FD_W) bw = FD_W;
+        y -= bh;
+        if (y < 0) break;
+        fill(&c, 2, y, bw, bh, 10, 0x0E1117);
+        feed_boxes[feed_box_count].x = 2 * scale, feed_boxes[feed_box_count].y = y * scale;
+        feed_boxes[feed_box_count].w = bw * scale, feed_boxes[feed_box_count].h = bh * scale;
+        feed_box_count++;
+        int st = lines[i].style >= 0 && lines[i].style < 4 ? lines[i].style : 0;
+        text(&c, lines[i].name, 14, y + 4, nw - 6, FD_ROW, 15, 700, name_col[st], TS_TEXT_LEFT);
+        for (int p = 0; p < k; ++p) text(&c, parts[p], 14 + nw, y + 4 + p * FD_ROW, bw - nw - 26, FD_ROW, 15, 600, 0xF4F5FA, TS_TEXT_LEFT);
+        y -= FD_GAP;
+    }
+}
+
+void ts_feed_finish(float scale, TsPhoneCanvas *cv) {
+    (void)scale;
+    const float body = 0.82f;
+    for (int py = 0; py < cv->h; ++py)
+        for (int px = 0; px < cv->w; ++px) {
+            uint32_t *dp = &cv->px[py * cv->w + px];
+            float cov = 0.0f;
+            for (int b = 0; b < feed_box_count; ++b) {
+                float r = 10 * scale;
+                float v = rbox_cover(px + 0.5f, py + 0.5f, feed_boxes[b].x, feed_boxes[b].y, feed_boxes[b].w, feed_boxes[b].h, r);
+                if (v > cov) cov = v;
+            }
+            uint32_t rgb = *dp & 0xFFFFFF;
+            /* the text keeps full strength, the box behind it lets the game through a little */
+            uint32_t rr = (rgb >> 16) & 255, g = (rgb >> 8) & 255, bb = rgb & 255;
+            uint32_t lum = rr > g ? (rr > bb ? rr : bb) : (g > bb ? g : bb);
+            float a = cov * (body + (1.0f - body) * (lum / 255.0f));
+            int ai = (int)(a * 255.0f + 0.5f);
+            if (ai <= 0) {
+                *dp = 0;
+                continue;
+            }
+            uint32_t m = (uint32_t)ai;
+            rgb = (rr > m ? m : rr) << 16 | (g > m ? m : g) << 8 | (bb > m ? m : bb);
+            *dp = m << 24 | rgb;
         }
 }
