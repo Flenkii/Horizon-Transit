@@ -52,14 +52,6 @@ msgctxt "row.Voices.choice.3"
 msgid "Loud"
 msgstr "Laut"
 
-msgctxt "row.PhoneMouse.label"
-msgid "Phone with the mouse"
-msgstr "Handy mit der Maus"
-
-msgctxt "row.PhoneMouse.description"
-msgid "While the phone is open: click a tab to open it, click an entry to pick it, click it again to take it; the wheel scrolls. Clicks on the phone don't reach the game."
-msgstr "Solange das Handy offen ist: Tab anklicken öffnet ihn, ein Eintrag anklicken wählt ihn, nochmal anklicken nimmt ihn; das Mausrad blättert. Klicks auf das Handy kommen nicht beim Spiel an."
-
 msgctxt "row.RidePanel.label"
 msgid "Ride panel by the speedometer"
 msgstr "Fahrt-Anzeige am Tacho"
@@ -163,3 +155,11 @@ msgstr "Fahraufträge und Buslinien annehmen, Konto und Bewertung."
 msgctxt "mod.description"
 msgid "Horizon Transit - Your festival. Your route. Rides and bus lines with virtual passengers: phone on F9, GPS route, time limit, speed, passenger comfort and the company's funds."
 msgstr "Horizon Transit - Dein Festival. Deine Route. Fahrdienst und Buslinien mit virtuellen Fahrgästen: Handy mit F9, GPS-Route, Zeitlimit, Tempo, Kundenzufriedenheit und Firmenkasse."
+
+msgctxt "row.PassengerDoors.label"
+msgid "Passenger doors"
+msgstr "Fahrgast-Türen"
+
+msgctxt "row.PassengerDoors.description"
+msgid "When a passenger gets in or out, a door opens and closes with its sound: rear left, rear right or the front passenger door. Cars without a door animation only play the sound."
+msgstr "Wenn ein Fahrgast ein- oder aussteigt, geht eine Tür mit Geräusch auf und wieder zu: hinten links, hinten rechts oder vorne beim Beifahrer. Autos ohne Tür-Animation spielen nur das Geräusch."

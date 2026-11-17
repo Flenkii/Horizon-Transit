@@ -2,6 +2,12 @@
 
 What changed for players, newest first. Every version is on the [Releases](../../releases) page.
 
+## 0.4.3
+- **Passenger doors (on by default)**: when a passenger gets in or out, a door opens and closes again with its sound: rear left, rear right or the front passenger door, at random. At the destination the same door opens again. The door really opens (the car's own showroom animation, also seen from outside). Cars without a door animation only play the sound. Getting in now takes 3.5 s (before 3 s), getting out 3.5 s (before 2 s). Switch: "Passenger doors" in the mod menu.
+- **Right-hand drive**: drive a car for about a second in the driver or cockpit view and the mod remembers which side its wheel is on; in a right-hand-drive car the front passenger door is on the left. Until then the wheel counts as left. You can also list cars in `TransportSim.ini` under `[Doors] RightHandDrive=`.
+- **Still one file**: the door sounds are built into `TransportSim.dll`. Own sounds: put `door_open.wav` / `door_close.wav` into `Azimuth\TransportSim\sounds`. Settings in `TransportSim.ini`, section `[Doors]`: `Animate` (0 = sound only), `ShutDelayMs`, `Volume`.
+- **The speed-limit sign turns red now**: yellow and flashing when you're a little too fast, steady red from 10 km/h (6 mph) over the limit. Before, it only turned red past 15 km/h and flashed, so you hardly ever saw red.
+
 ## 0.4.2
 - **Place and bus line names in English** on an English game: "Nice · Spot 4" instead of "Nizza · Treffpunkt 4", "Coast Line" instead of "Küstenlinie".
 - **The old HUD list is gone** from the phone designs: the phone is always the drawn smartphone.
@@ -10,12 +16,12 @@ What changed for players, newest first. Every version is on the [Releases](../..
 - **Long lines aren't cut off** any more: they continue on a second feed line.
 - **New switch "Passenger complaints"** (phone > Options and the mod menu): Off = no remarks about braking, speed, crashes or being late. The rating still counts.
 - **Four new phone designs**: Ocean, Carbon, Riviera and Gold (besides Night, Light and Festival).
-- **Phone with the mouse** (mod menu, on by default): click a tab, click an entry to pick it and again to take it, the wheel scrolls. When the game hides the mouse pointer, the phone draws its own.
 - **The "Phone with arrow keys" switch is gone**: the arrow keys, Enter and Backspace always work the open phone. Its place in Options now holds "Voices".
 - **Passenger voices (experimental, off by default)**: passengers read their lines out loud with the Windows speech voices, each person with their own pitch. Mod menu: Off, Quiet, Normal, Loud.
 - Passengers say their speed limit in mph too on an English game (before: km/h).
-- **Ride panel by the speedometer**: while a passenger rides, bottom right: the speed-limit sign, a G-meter (keep the dot inside the circle: outside means braking, accelerating or cornering too hard), time left, the passenger's mood and wish. The sign at the top left is gone. Its place can be moved (RidePanelRight / RidePanelBottom in TransportSim.ini), and it can be switched off in the mod menu.
+- **Ride panel by the speedometer**: while a passenger rides, bottom right: the speed-limit sign, a G-meter (keep the dot inside the circle: outside means braking, accelerating or cornering too hard), time left, the passenger's mood and wish. The sign at the top left is gone, and during a job the top of the screen stays clear. Before pickup the panel shows "Pick up" and the distance. Its place can be moved (RidePanelRight / RidePanelBottom in TransportSim.ini), and it can be switched off in the mod menu.
 - **More varied rides**: places of your last rides are avoided, and the destination is usually in another area than the pickup. Now and then a quick hop (under 1.4 km) or a long trip across the map (7 to 14 km).
+- **Much calmer passengers**: higher limits for gas (6.0 instead of 4.5 m/s²), braking (8.5 instead of 6.5) and cornering (8.5 instead of 6.5), 15 instead of 10 km/h leeway on speed, a harsh moment counts only after 0.6 s, remarks at most once a minute. The G-meter shows the new limits. The speed-limit sign flashes yellow when you're a little too fast and red once you're past the 15 km/h leeway.
 - **Passenger lines always visible**: when the platform's HUD layer is off, the mod shows the lines itself, bottom left above the minimap.
 - **Not everyone complains**: each passenger is quiet, now-and-then or outspoken. Quiet ones hardly say anything; sometimes you just see what they think ("Lena (thinks): Hm. That was a bit rough."). Thoughts are never read out. The rating still counts.
 

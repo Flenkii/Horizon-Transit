@@ -5,7 +5,7 @@
 A ride-hailing and bus-line mod for **Forza Horizon 2 on PC**: take Uber-style rides and drive bus lines with virtual passengers who talk, remember you and rate your driving. Everything runs from a phone on the left of the screen (**F9**).
 One mod, one file (`TransportSim.dll`), for the [FH2 Mod Platform](https://github.com/Trinculo54/fh2-mod-platform). Texts in English and German.
 
-**[⬇ Download the latest version](../../releases/latest)** · current version: **0.4.2**
+**[⬇ Download the latest version](../../releases/latest)** · current version: **0.4.3**
 
 > Horizon Transit is new and in active development. The release list shows what is new.
 
@@ -19,7 +19,7 @@ One mod, one file (`TransportSim.dll`), for the [FH2 Mod Platform](https://githu
 
 ### 🚕 Rides
 - **3 requests nearby** on the phone, short, medium and long, at 208 real places of the game (festival, towns, meeting spots).
-- The game's **GPS** guides you to the pickup and on to the destination. Stop there and the passenger gets in or out.
+- The game's **GPS** guides you to the pickup and on to the destination. Stop there and the passenger gets in or out: **a door really opens and closes with its sound** (rear left, rear right or front passenger; right-hand-drive cars are recognised).
 - **Satisfaction** from your driving: hard throttle, braking, cornering, speeding and crashes cost, calm driving pays back. Every passenger has a speed limit, shown as a sign top left (mph or km/h, as the game is set). **Pay and 1–5 stars** at the end.
 - **40 passengers with a life**: name, age, job and a story they tell bit by bit. Regulars know you, remember your last car and how the last ride went.
 - **Passenger kinds**: normal, relaxed, in a hurry, car fan, and special rides: **VIP**, **business client**, **wedding couple**, **day trip**.
@@ -41,7 +41,7 @@ One mod, one file (`TransportSim.dll`), for the [FH2 Mod Platform](https://githu
 - **Statistics**: tips, punctuality, wishes, special rides, records.
 
 ### 📱 The phone
-- A drawn smartphone on the left, in 7 designs (Night, Light, Festival, Ocean, Carbon, Riviera, Gold). Works with the arrow keys, a pad or the mouse.
+- A drawn smartphone on the left, in 7 designs (Night, Light, Festival, Ocean, Carbon, Riviera, Gold). Works with the arrow keys or a pad.
 - Tabs: Rides · Bus · Account · Shop · Options. Arrow keys, Enter and Backspace while it is open; most settings also in the phone (Options).
 
 ---
@@ -98,10 +98,12 @@ All keys can be changed in Pause › MODS › YOUR MODS › Horizon Transit. LB 
 - **[Trinculo54](https://github.com/Trinculo54/fh2-mod-platform)** – FH2 Mod Platform; Horizon Transit uses its MIT API headers (`third_party/fh2mod`)
 - **[Flenkii](https://github.com/Flenkii)** – idea, testing, maintainer (also [Gripline](https://github.com/Flenkii/Gripline))
 - **Claude (Anthropic)** – wrote the code together with Flenkii
+- Door sounds: **Sounds From The Lab** (royalty-free)
+- How the game opens car doors in free roam was learned from **[Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions)** (its roof) and **Gripline** (no code taken, only how it works)
 - Works well with **Gripline**, **[FH2 ANNA](https://github.com/qiangqiang101/FH2_ANNA)** and **[NitroSystem](https://github.com/qiangqiang101/NitroSystem)**
 
 ## Building and license
-`pip install ziglang==0.15.2`, then `python build.py`: it runs the logic tests (8007 checks) and makes `out/TransportSim.dll`. The game data tables are made by `tools/gen_stops.py` and `tools/gen_cars.py` from your own game files.
+`pip install ziglang==0.15.2`, then `python build.py`: it runs the logic tests (8152 checks) and makes `out/TransportSim.dll`. The game data tables are made by `tools/gen_stops.py` and `tools/gen_cars.py` from your own game files.
 GPL-3.0 (see [LICENSE](LICENSE)). Changes: [CHANGELOG.md](CHANGELOG.md) · plan of the ideas (German): [docs/ROADMAP_de.md](docs/ROADMAP_de.md).
 
 ## AI disclosure

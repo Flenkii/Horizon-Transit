@@ -49,7 +49,17 @@ enum {
 };
 
 /* what the glue should do (toasts and chat lines) */
-enum { TS_EV_TOAST = 1, TS_EV_FEED, TS_EV_SAVE, TS_EV_SOUND };
+enum { TS_EV_TOAST = 1, TS_EV_FEED, TS_EV_SAVE, TS_EV_SOUND, TS_EV_DOOR };
+
+/* 0.4.3: the passenger's door (doors.c). TS_EV_DOOR: sound = TS_DOOR_ step, style = TS_DOOR_LF.. (the door) */
+enum { TS_DOOR_LF = 0, TS_DOOR_RF, TS_DOOR_LR, TS_DOOR_RR, TS_DOORS }; /* left/right, front/rear, as the driver sits */
+enum {
+    TS_DOOR_PREPARE = 1, /* the glue gets the car's animation ready (its showroom detail) */
+    TS_DOOR_OPEN,        /* the door opens: animation and the open sound */
+    TS_DOOR_CLOSE,       /* the door closes: animation */
+    TS_DOOR_SHUT,        /* the door hits the frame: the close sound */
+    TS_DOOR_DONE         /* the glue gives the car's animation back to the game */
+};
 enum { TS_SOUND_NOTIFY = 1, TS_SOUND_TICK, TS_SOUND_TICK_END, TS_SOUND_ERROR };
 enum { TS_ICON_NONE = 0, TS_ICON_PAYOUT, TS_ICON_ROADS, TS_ICON_TROPHY };
 typedef struct {
@@ -94,7 +104,7 @@ typedef struct {
     int countdown;                   /* boarding seconds, 0 = none */
     char countdown_label[64];
     int sign_limit;                  /* the speed-limit sign while a passenger rides (in the shown unit), 0 = none */
-    int sign_over;                   /* too fast now */
+    int sign_over;                   /* too fast now: 1 a little (yellow), 2 past the 15 km/h leeway (red) */
     char sign_unit[8];               /* "km/h" / "mph" */
     int g_on;                        /* the G-meter while a passenger rides */
     float g_lat, g_long;             /* sideways (+ right) and forward (+ gas, - braking), 1.0 = the passenger's limit */
@@ -212,6 +222,15 @@ typedef struct {
     int plan_started, stops_on_time, stops_late;
     float last_delay;
 
+    /* 0.4.3: the passenger's door when getting in and out (doors.c; Uber rides only) */
+    int doors_on;         /* the setting (glue) */
+    int door_mask;        /* the doors the driven car can open (1 << TS_DOOR_), 0 = not known (glue) */
+    int driver_right;     /* the wheel is on the right (glue) */
+    float door_shut_s;    /* seconds from "close" to the close sound (glue; 0 = the default) */
+    int door;             /* the passenger's door this ride, -1 = none chosen */
+    int door_step;        /* the last TS_DOOR_ step sent, 0 = none */
+    double door_t0;       /* when the sequence started */
+
     TsEvent events[TS_MAX_EVENTS];
     int event_count;
 } TsCore;
@@ -226,9 +245,7 @@ void ts_phone_toggle(TsCore *c);
 void ts_phone_next(TsCore *c);
 void ts_phone_prev(TsCore *c);
 void ts_phone_tab(TsCore *c, int direction); /* -1 / +1: the tab to the left / right */
-/* a mouse click on the drawn phone: a tab (tab >= 0), or an entry by its TsHud rows (row, its second line row2 or -1).
-   The first click on an entry picks it, a click on the picked one takes it (like Enter). */
-void ts_phone_click(TsCore *c, int tab, int row, int row2);
+
 /* the driven car, by its media name ("LAM_MiuraP400_67"; NULL or "" = unknown) */
 void ts_set_car(TsCore *c, const char *media);
 void ts_phone_accept(TsCore *c);   /* phone open: accept the selected row; during a job: cancel (twice) */
@@ -269,6 +286,16 @@ int ts_feed_split(const char *text, int max_chars, char out[][TS_TEXT], int max_
 /* the slot of a line in TsCore.line_used_at, -1 if the lines don't fit */
 int ts_line_is_complaint(int kind); /* 1: silenced by complaints_off */
 int ts_line_slot(int kind, int index);
+
+/* 0.4.3: doors (doors.c) */
+int ts_door_pick(TsCore *c);                 /* the passenger's door for this car: rear left, rear right or the front passenger door */
+int ts_door_front_passenger(int driver_right);
+void ts_door_start(TsCore *c);               /* stopped at the pickup or the destination: the sequence starts */
+void ts_door_step(TsCore *c);                /* from the job step: sends the steps that are due */
+void ts_door_abort(TsCore *c);               /* drove off: an open door closes at once, the car's animation goes back */
+double ts_door_total_s(const TsCore *c);     /* seconds from the start to DONE (0 with doors off) */
+const char *ts_door_name(int door);          /* "doorRR" (the car's animation names) */
+double ts_uber_stop_s(const TsCore *c, int boarding); /* seconds the passenger takes to get in (1) or out (0) */
 
 /* helpers shared with the glue */
 float ts_distance_xz(const float a[3], const float b[3]);

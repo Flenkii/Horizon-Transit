@@ -1,6 +1,5 @@
 /* The phone window, see phone_window.h. */
 #include <windows.h>
-#include <windowsx.h>
 #include <string.h>
 #include <stdio.h>
 #include "phone_window.h"
@@ -12,17 +11,7 @@ static TsHud want_hud;
 static int want_theme, want_on;
 static int sign_number, sign_over, sign_on;
 static char sign_unit[8];
-static volatile LONG ok, visible, mouse_on;
-static PhoneClickFn on_click;
-static PhoneWheelFn on_wheel;
-/* the window's thread only: where the drawn phone can be clicked, and whether it takes clicks now */
-static TsPhoneHit hits[TS_PHONE_HITS];
-static int hit_count, clickable;
-
-void phone_window_mouse(int enabled, PhoneClickFn click, PhoneWheelFn wheel) {
-    on_click = click, on_wheel = wheel;
-    InterlockedExchange(&mouse_on, enabled != 0);
-}
+static volatile LONG ok, visible;
 
 void phone_window_show(const TsHud *h, int theme, int want) {
     AcquireSRWLockExclusive(&lock);
@@ -39,7 +28,6 @@ void phone_window_sign(int number, const char *unit, int over, int want) {
     snprintf(sign_unit, sizeof(sign_unit), "%s", unit ? unit : "");
     ReleaseSRWLockExclusive(&lock);
 }
-
 static TsHud dash_hud;
 static int dash_on, dash_right = 410, dash_bottom = 110;
 
@@ -164,97 +152,10 @@ static int gdi_measure(void *user, const TsPhoneText *t) {
 
 /* ------------------------------------------------------------------ the window */
 
-static const TsPhoneHit *hit_at(int x, int y) {
-    for (int i = 0; i < hit_count; ++i)
-        if (x >= hits[i].x && y >= hits[i].y && x < hits[i].x + hits[i].w && y < hits[i].y + hits[i].h) return &hits[i];
-    return NULL;
-}
-
 static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
-    if (msg == WM_MOUSEACTIVATE) return MA_NOACTIVATE; /* the game keeps the focus */
-    int mine = w == own_window && clickable;
-    if (msg == WM_NCHITTEST) return mine ? HTCLIENT : HTTRANSPARENT;
-    if (mine && msg == WM_SETCURSOR) {
-        POINT pt;
-        GetCursorPos(&pt);
-        ScreenToClient(w, &pt);
-        SetCursor(LoadCursorW(NULL, hit_at(pt.x, pt.y) ? (LPCWSTR)IDC_HAND : (LPCWSTR)IDC_ARROW));
-        return TRUE;
-    }
-    if (mine && (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK || msg == WM_LBUTTONUP)) return 0; /* kept from the game; poll_mouse acts */
-    if (mine && msg == WM_MOUSEWHEEL) {
-        if (on_wheel) on_wheel(GET_WHEEL_DELTA_WPARAM(wp) > 0 ? -1 : 1);
-        return 0;
-    }
+    if (msg == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
+    if (msg == WM_NCHITTEST) return HTTRANSPARENT;
     return DefWindowProcW(w, msg, wp, lp);
-}
-
-/* The mouse, read directly (the game may keep the mouse's messages to itself or hide the pointer): where the
-   pointer is over the phone, and a press of the left button. */
-static int was_down, mouse_logs, over_logged;
-static int poll_mouse(POINT pos, int bw, int bh, int *cx, int *cy) {
-    POINT pt;
-    *cx = *cy = -1;
-    if (!GetCursorPos(&pt)) return 0;
-    int x = pt.x - pos.x, y = pt.y - pos.y;
-    int inside = x >= 0 && y >= 0 && x < bw && y < bh;
-    int down = (GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
-    CURSORINFO ci;
-    memset(&ci, 0, sizeof(ci));
-    ci.cbSize = sizeof(ci);
-    int pointer_shown = GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING);
-    if (inside && !over_logged) {
-        over_logged = 1;
-        if (plog) plog("mouse: pointer over the phone (Windows shows the pointer: %s)", pointer_shown ? "yes" : "no, the phone draws one");
-    }
-    if (inside && down && !was_down) {
-        const TsPhoneHit *h = hit_at(x, y);
-        if (plog && mouse_logs < 20) mouse_logs++, plog("mouse: click at %d,%d -> %s %d", x, y, h ? (h->tab >= 0 ? "tab" : "row") : "nothing", h ? (h->tab >= 0 ? h->tab : h->row) : -1);
-        if (h && on_click) on_click(h->tab, h->row, h->row2);
-    }
-    was_down = down;
-    if (inside && !pointer_shown) *cx = x, *cy = y;
-    return inside;
-}
-
-static int in_poly(const float *xy, int n, float x, float y) {
-    int in = 0;
-    for (int i = 0, j = n - 1; i < n; j = i++) {
-        float xi = xy[2 * i], yi = xy[2 * i + 1], xj = xy[2 * j], yj = xy[2 * j + 1];
-        if ((yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) in = !in;
-    }
-    return in;
-}
-
-/* an arrow pointer (white, black edge) into the premultiplied picture, its tip at (cx, cy) */
-static void draw_pointer(uint32_t *bits, int bw, int bh, int cx, int cy, float scale) {
-    static const float shape[] = {0, 0, 0, 17, 4, 13, 7, 20, 9.5f, 19, 6.5f, 12, 12, 12};
-    float poly[14];
-    float s = scale < 0.8f ? 0.8f : scale;
-    for (int i = 0; i < 7; ++i) poly[2 * i] = shape[2 * i] * s, poly[2 * i + 1] = shape[2 * i + 1] * s;
-    int w = (int)(14 * s) + 3, h = (int)(22 * s) + 3;
-    for (int y = -2; y < h; ++y)
-        for (int x = -2; x < w; ++x) {
-            int px = cx + x, py = cy + y;
-            if (px < 0 || py < 0 || px >= bw || py >= bh) continue;
-            float fx = x + 0.5f, fy = y + 0.5f;
-            int fill = in_poly(poly, 7, fx, fy);
-            int edge = !fill && (in_poly(poly, 7, fx - 1.2f, fy) || in_poly(poly, 7, fx + 1.2f, fy) || in_poly(poly, 7, fx, fy - 1.2f) ||
-                                 in_poly(poly, 7, fx, fy + 1.2f));
-            if (fill) bits[py * bw + px] = 0xFFFFFFFFu;
-            else if (edge) bits[py * bw + px] = 0xFF000000u;
-        }
-}
-
-/* clicks on the phone (shown, mouse on) go to it, else through to the game */
-static void set_clickable(int want) {
-    if (want == clickable || !own_window) return;
-    clickable = want;
-    LONG_PTR ex = GetWindowLongPtrW(own_window, GWL_EXSTYLE);
-    ex = want ? ex & ~(LONG_PTR)WS_EX_TRANSPARENT : ex | WS_EX_TRANSPARENT;
-    SetWindowLongPtrW(own_window, GWL_EXSTYLE, ex);
-    SetWindowPos(own_window, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-    if (plog) plog("phone window: mouse %s", want ? "on" : "off");
 }
 
 static DWORD WINAPI window_thread(void *unused) {
@@ -306,7 +207,6 @@ static DWORD WINAPI window_thread(void *unused) {
     float drawn_scale = 0;
     char drawn_clock[8] = "";
     POINT drawn_pos = {-99999, -99999};
-    int drawn_cur_x = -1, drawn_cur_y = -1;
 
     for (;;) {
         MSG m;
@@ -365,8 +265,9 @@ static DWORD WINAPI window_thread(void *unused) {
             if (!want_dash) {
                 if (sign_shown) ShowWindow(sign_window, SW_HIDE), sign_shown = 0;
             } else {
-                int flash = dh.sign_over && (GetTickCount64() / 400) % 2 == 0;
-                dh.sign_over = flash;
+                /* a little too fast: yellow, flashing; clearly too fast: red, steady (0.4.3) */
+                int flash = dh.sign_over == 2 || (dh.sign_over && (GetTickCount64() / 400) % 2 == 0);
+                dh.sign_over = flash ? dh.sign_over : 0;
                 int sw, sh;
                 ts_dash_size(scale, &sw, &sh);
                 int dirty = !sign_bmp || scale != sign_drawn_scale || memcmp(&dh, &dash_drawn, sizeof(dh)) != 0;
@@ -390,7 +291,7 @@ static DWORD WINAPI window_thread(void *unused) {
                         memset(sign_bits, 0, (size_t)sbw * sbh * 4);
                         SetBkMode(sign_dc, TRANSPARENT);
                         Gdi g = {sign_dc};
-                        TsPhoneCanvas cv = {sign_bits, sbw, sbh, gdi_text, gdi_measure, &g, NULL, 0};
+                        TsPhoneCanvas cv = {sign_bits, sbw, sbh, gdi_text, gdi_measure, &g};
                         ts_dash_draw(&dh, scale, &cv);
                         GdiFlush();
                         ts_dash_finish(scale, &cv);
@@ -440,7 +341,7 @@ static DWORD WINAPI window_thread(void *unused) {
                         memset(feed_bits, 0, (size_t)fbw * fbh * 4);
                         SetBkMode(feed_dc, TRANSPARENT);
                         Gdi g = {feed_dc};
-                        TsPhoneCanvas cv = {feed_bits, fbw, fbh, gdi_text, gdi_measure, &g, NULL, 0};
+                        TsPhoneCanvas cv = {feed_bits, fbw, fbh, gdi_text, gdi_measure, &g};
                         ts_feed_draw(fl, f_n, scale, &cv);
                         GdiFlush();
                         ts_feed_finish(scale, &cv);
@@ -463,7 +364,6 @@ static DWORD WINAPI window_thread(void *unused) {
 
         if (!on || !front) {
             if (shown) ShowWindow(own_window, SW_HIDE), shown = 0, alpha = 0;
-            set_clickable(0);
             InterlockedExchange(&visible, 0);
             continue;
         }
@@ -472,16 +372,8 @@ static DWORD WINAPI window_thread(void *unused) {
         char clock[8];
         snprintf(clock, sizeof(clock), "%02u:%02u", (unsigned)st.wHour % 100u, (unsigned)st.wMinute % 100u);
 
-        /* the mouse: where the pointer is (drawn by the phone when Windows hides it), a click */
-        int cur_x = -1, cur_y = -1;
-        if (mouse_on && shown) {
-            POINT at = {origin.x + (int)(10 * scale), origin.y + (int)(78 * scale)};
-            poll_mouse(at, bw, bh, &cur_x, &cur_y);
-        } else {
-            was_down = 1; /* a press that started elsewhere doesn't count once the phone shows */
-        }
         int redraw = !drawn_valid || theme != drawn_theme || scale != drawn_scale || strcmp(clock, drawn_clock) ||
-                     memcmp(&h, &drawn, sizeof(h)) != 0 || cur_x != drawn_cur_x || cur_y != drawn_cur_y;
+                     memcmp(&h, &drawn, sizeof(h)) != 0;
         if (redraw) {
             int w, hh;
             ts_phone_size(scale, &w, &hh);
@@ -510,13 +402,10 @@ static DWORD WINAPI window_thread(void *unused) {
             memset(bits, 0, (size_t)bw * bh * 4);
             SetBkMode(dc, TRANSPARENT);
             Gdi g = {dc};
-            TsPhoneCanvas cv = {bits, bw, bh, gdi_text, gdi_measure, &g, hits, 0};
+            TsPhoneCanvas cv = {bits, bw, bh, gdi_text, gdi_measure, &g};
             ts_phone_draw(&h, theme, scale, clock, &cv);
-            hit_count = cv.hit_count;
             GdiFlush();
             ts_phone_finish(theme, scale, &cv);
-            if (cur_x >= 0) draw_pointer(bits, bw, bh, cur_x, cur_y, scale);
-            drawn_cur_x = cur_x, drawn_cur_y = cur_y;
             drawn = h, drawn_theme = theme, drawn_scale = scale, drawn_valid = 1;
             snprintf(drawn_clock, sizeof(drawn_clock), "%s", clock);
         }
@@ -543,7 +432,6 @@ static DWORD WINAPI window_thread(void *unused) {
             logged_first = 1;
         }
         InterlockedExchange(&visible, 1);
-        set_clickable(mouse_on != 0);
     }
 }
 

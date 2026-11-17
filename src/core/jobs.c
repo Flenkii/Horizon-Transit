@@ -9,6 +9,11 @@
 #include <stdio.h>
 #include <string.h>
 
+/* 0.4.2: calmer passengers (Marvin: "they still moan even when I drive carefully"): m/s^2 */
+#define TS_LIM_GAS 6.0f
+#define TS_LIM_BRAKE 8.5f
+#define TS_LIM_SIDE 8.5f
+#define TS_LIM_SIDE_FAN 10.0f
 #define PASSENGER_COUNT (int)(ts_people_count < TS_PEOPLE_MAX ? ts_people_count : TS_PEOPLE_MAX)
 
 const char *ts_passenger_name(int index) {
@@ -435,6 +440,7 @@ void ts_init(TsCore *c, uint32_t seed, int german) {
     c->area = -1;
     c->wish_place = -1;
     c->setting_pressed = -1;
+    c->door = -1;
 }
 
 /* ------------------------------------------------------------------ the car and the passengers' comfort */
@@ -509,25 +515,25 @@ void ts_car_sample(TsCore *c, float dt, const TsCar *car) {
     float drop = 0.0f;
     int harsh = 0, fun = 0;
     /* 0.4: more forgiving (players: "they moan too often"): higher limits, less loss, 10 km/h leeway */
-    if (c->acc_long > 4.5f) {
+    if (c->acc_long > TS_LIM_GAS) {
         if (type == TS_P_FAN) fun = 1;
         else drop += 1.4f * soft, harsh = 1;
     }
-    if (c->acc_long < -10.0f) drop += 4.0f * soft, harsh = 2;
-    else if (c->acc_long < -6.5f) drop += 2.0f * soft, harsh = 2;
-    if (fabsf(c->acc_lat) > (type == TS_P_FAN ? 8.0f : 6.5f)) drop += 1.8f * soft, harsh = 3;
+    if (c->acc_long < -12.0f) drop += 4.0f * soft, harsh = 2;
+    else if (c->acc_long < -TS_LIM_BRAKE) drop += 2.0f * soft, harsh = 2;
+    if (fabsf(c->acc_lat) > (type == TS_P_FAN ? TS_LIM_SIDE_FAN : TS_LIM_SIDE)) drop += 1.8f * soft, harsh = 3;
     if (c->speed > limit + 11.1f) drop += 2.5f, harsh = harsh ? harsh : 4;      /* 40 km/h over */
-    else if (c->speed > limit + 2.8f) drop += 0.7f * soft, harsh = harsh ? harsh : 4; /* 10 km/h over */
+    else if (c->speed > limit + 4.2f) drop += 0.7f * soft, harsh = harsh ? harsh : 4; /* 10 km/h over */
     /* a harsh moment counts once it lasts 0.35 s (a short twitch of the wheel doesn't) */
     if (!harsh) c->harsh_since = c->t;
-    else if (c->t - c->harsh_since < 0.35) harsh = 0, drop = 0.0f;
+    else if (c->t - c->harsh_since < 0.6) harsh = 0, drop = 0.0f;
     if (harsh && !c->was_harsh) { /* count each harsh moment once */
         if (harsh == 1) c->n_accel++;
         else if (harsh == 2) c->n_brake++;
         else if (harsh == 3) c->n_corner++;
         else c->n_speeding++;
         if (c->t >= c->complain_at && c->t >= c->chat_cooldown) { /* a remark at most every 35 s */
-            c->complain_at = c->t + 35.0;
+            c->complain_at = c->t + 60.0;
             int kind = harsh == 2 ? (bus ? L_BUS_BRAKE : L_BRAKE) : harsh == 3 ? (bus ? L_BUS_CORNER : L_CORNER)
                      : harsh == 4 ? (bus ? L_BUS_SPEEDING : L_SPEEDING) : L_ACCEL;
             complain(c, kind);
@@ -769,37 +775,6 @@ void ts_phone_tab(TsCore *c, int direction) {
     c->phone_sel = 0;
 }
 
-static int hits_selected(const TsHud *h, int row, int row2) {
-    return h->row_selected >= 0 && (row == h->row_selected || (row2 >= 0 && row2 == h->row_selected));
-}
-
-void ts_phone_click(TsCore *c, int tab, int row, int row2) {
-    if (!c->phone_open) return;
-    TsHud h;
-    if (c->mode != TS_IDLE) { /* during a job only the picked entry (cancel) answers, with its usual second press */
-        ts_hud(c, &h);
-        if (row >= 0 && hits_selected(&h, row, row2)) ts_phone_accept(c);
-        return;
-    }
-    if (tab >= 0) {
-        if (tab < TS_TABS && tab != c->phone_tab) c->phone_tab = tab, c->phone_sel = 0;
-        return;
-    }
-    if (row < 0) return;
-    ts_hud(c, &h);
-    if (hits_selected(&h, row, row2)) {
-        ts_phone_accept(c);
-        return;
-    }
-    int keep = c->phone_sel, n = tab_items(c, c->phone_tab);
-    for (int s = 0; s < n; ++s) {
-        c->phone_sel = s;
-        ts_hud(c, &h);
-        if (hits_selected(&h, row, row2)) return;
-    }
-    c->phone_sel = keep; /* not an entry that can be picked (a heading, the account's figures) */
-}
-
 static void start_uber(TsCore *c, const TsOffer *o) {
     remember_place(c, o->pickup);
     remember_place(c, o->dest);
@@ -807,6 +782,8 @@ static void start_uber(TsCore *c, const TsOffer *o) {
     c->job = *o;
     c->stage = TS_UBER_TO_PICKUP;
     c->stage_t = c->leg_t = c->trip_t = c->t;
+    c->door = -1; /* 0.4.3: picked when the passenger gets in */
+    c->door_step = 0;
     /* the passenger waits this long before getting impatient */
     c->deadline = c->t + (o->pickup_m * TS_ROAD_FACTOR / TS_UBER_AVG_SPEED + 60.0f) * c->time_factor;
     c->sat = 80.0f;
@@ -875,6 +852,7 @@ static void finish_stats(TsCore *c, int stars) {
 }
 
 static void end_job(TsCore *c) {
+    ts_door_abort(c); /* 0.4.3: a door still open closes */
     c->mode = TS_IDLE;
     c->stage = 0;
     c->phone_open = 0;
@@ -979,6 +957,12 @@ static void uber_complete(TsCore *c) {
     end_job(c);
 }
 
+/* seconds standing at the pickup (boarding 1) or the destination: 3 / 2, longer while the door opens and closes (0.4.3) */
+double ts_uber_stop_s(const TsCore *c, int boarding) {
+    double base = boarding ? 3.0 : 2.0, doors = ts_door_total_s(c);
+    return doors > base ? doors : base;
+}
+
 static void uber_step(TsCore *c) {
     const float *pickup = ts_places[c->job.pickup].pos, *dest = ts_places[c->job.dest].pos;
     switch (c->stage) {
@@ -990,15 +974,19 @@ static void uber_step(TsCore *c) {
         if (arrived_at(c, pickup) && c->speed < TS_STOPPED_SPEED) {
             c->stage = TS_UBER_BOARDING;
             c->stage_t = c->t;
+            ts_door_start(c);
         }
         break;
     case TS_UBER_BOARDING:
         if (c->speed > TS_LEAVE_SPEED) { /* drove off before the passenger was in */
+            ts_door_abort(c);
             c->stage = TS_UBER_TO_PICKUP;
             say(c, 3, L_NOT_IN_YET, 1);
             break;
         }
-        if (c->t - c->stage_t >= 3.0) {
+        ts_door_step(c);
+        if (c->t - c->stage_t >= ts_uber_stop_s(c, 1)) {
+            ts_door_abort(c); /* whatever step is still due happens now */
             /* waited too long: the passenger starts less happy (1 point per 5 s, at most 20) */
             float waited = (float)(c->t - c->deadline);
             c->sat = (ts_has(c, TS_SHOP_COMFORT) ? 85.0f : 80.0f) - (waited > 0.0f ? clampf(waited / 5.0f, 0.0f, 20.0f) : 0.0f);
@@ -1095,15 +1083,21 @@ static void uber_step(TsCore *c) {
             wish_arrived_at_dest(c);
             c->stage = TS_UBER_ALIGHTING;
             c->stage_t = c->t;
+            ts_door_start(c);
         }
         break;
     case TS_UBER_ALIGHTING:
         if (c->speed > TS_LEAVE_SPEED) {
+            ts_door_abort(c);
             c->stage = TS_UBER_TO_DEST;
             say(c, 3, L_WANT_OUT, 1);
             break;
         }
-        if (c->t - c->stage_t >= 2.0) uber_complete(c);
+        ts_door_step(c);
+        if (c->t - c->stage_t >= ts_uber_stop_s(c, 0)) {
+            ts_door_abort(c);
+            uber_complete(c);
+        }
         break;
     }
 }
@@ -1313,12 +1307,14 @@ void ts_hud(const TsCore *c, TsHud *h) {
         int carrying = (c->mode == TS_UBER && c->stage >= TS_UBER_TO_DEST) || (c->mode == TS_BUS && c->onboard > 0);
         if (carrying) {
             h->sign_limit = ts_speed_shown(c, max);
-            h->sign_over = over;
+            /* 1 a little over (yellow), 2 clearly over (red): 10 km/h, in mph 6 mph over the sign (0.4.3: 15 km/h was rarely reached) */
+            float red_kmh = c->imperial ? 6.0f * 1.609344f : 10.0f;
+            h->sign_over = !over ? 0 : c->speed * 3.6f > (float)max + red_kmh ? 2 : 1;
             snprintf(h->sign_unit, sizeof(h->sign_unit), "%s", ts_speed_unit(c));
             /* the G-meter: the same limits ts_car_sample counts as harsh (gas 4.5, braking 6.5, sideways 6.5 / a fan 8 m/s^2),
                rounded to 0.05 so the picture changes only when the dot moves */
-            float lat_limit = c->mode == TS_UBER && c->job.ptype == TS_P_FAN ? 8.0f : 6.5f;
-            float gl = c->acc_lat / lat_limit, gf = c->acc_long > 0.0f ? c->acc_long / 4.5f : c->acc_long / 6.5f;
+            float lat_limit = c->mode == TS_UBER && c->job.ptype == TS_P_FAN ? TS_LIM_SIDE_FAN : TS_LIM_SIDE;
+            float gl = c->acc_lat / lat_limit, gf = c->acc_long > 0.0f ? c->acc_long / TS_LIM_GAS : c->acc_long / TS_LIM_BRAKE;
             h->g_on = c->car_ok;
             h->g_lat = roundf(clampf(gl, -1.6f, 1.6f) * 20.0f) / 20.0f;
             h->g_long = roundf(clampf(gf, -1.6f, 1.6f) * 20.0f) / 20.0f;
@@ -1358,7 +1354,7 @@ void ts_hud(const TsCore *c, TsHud *h) {
             else if (pending_in > 0) snprintf(h->countdown_label, sizeof(h->countdown_label), "%d %s", pending_in, T(c, "steigen ein", "getting on"));
             else snprintf(h->countdown_label, sizeof(h->countdown_label), "%s", T(c, "Türen schließen", "Doors closing"));
         } else if (c->mode == TS_UBER && (c->stage == TS_UBER_BOARDING || c->stage == TS_UBER_ALIGHTING)) {
-            float total = c->stage == TS_UBER_BOARDING ? 3.0f : 2.0f;
+            float total = (float)ts_uber_stop_s(c, c->stage == TS_UBER_BOARDING);
             float left_s = total - (float)(c->t - c->stage_t);
             h->countdown = left_s > 0.0f ? (int)(left_s + 0.999f) : 0;
             snprintf(h->countdown_label, sizeof(h->countdown_label), "%s %s", ts_passenger_name(c->job.passenger),

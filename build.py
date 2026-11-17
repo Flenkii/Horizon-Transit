@@ -7,7 +7,7 @@ Braucht: pip install ziglang==0.15.2   (ein C-Compiler fuer Windows, ohne Visual
 import os, shutil, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-CORE = ["src/core/jobs.c", "src/core/stops_data.c", "src/core/cars_data.c", "src/core/lines.c", "src/core/phone_draw.c", "src/core/people.c", "src/core/career.c", "src/core/wishes.c", "src/core/timetable.c", "src/core/bus_sql.c", "src/core/shop.c"]
+CORE = ["src/core/jobs.c", "src/core/stops_data.c", "src/core/cars_data.c", "src/core/lines.c", "src/core/phone_draw.c", "src/core/people.c", "src/core/career.c", "src/core/wishes.c", "src/core/timetable.c", "src/core/bus_sql.c", "src/core/shop.c", "src/core/doors.c"]
 
 
 def run(cmd):
@@ -32,8 +32,27 @@ def po_header():
             f.write(text)
 
 
+def sounds_header():
+    """sounds/door_open.wav und door_close.wav als C-Bytes in src/door_sounds.h (die Geraeusche stecken in der DLL)"""
+    out = ["/* The door sounds (sounds/door_open.wav and door_close.wav, built in by build.py: don't edit here). Sounds From The Lab, royalty-free. */",
+           "#ifndef TS_DOOR_SOUNDS_H", "#define TS_DOOR_SOUNDS_H"]
+    for name in ("door_open", "door_close"):
+        data = open(os.path.join(ROOT, "sounds", name + ".wav"), "rb").read()
+        out.append("static const unsigned char ts_%s_wav[%d] = {" % (name, len(data)))
+        for i in range(0, len(data), 32):
+            out.append("    " + ",".join(str(b) for b in data[i:i + 32]) + ",")
+        out.append("};")
+    out += ["#endif", ""]
+    text = "\n".join(out)
+    path = os.path.join(ROOT, "src", "door_sounds.h")
+    if not os.path.exists(path) or open(path, encoding="utf-8").read() != text:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+
+
 def main():
     po_header()
+    sounds_header()
     zig = [sys.executable, "-m", "ziglang", "cc"]
     os.makedirs(os.path.join(ROOT, "out"), exist_ok=True)
     # 1. Logik-Tests auf diesem PC

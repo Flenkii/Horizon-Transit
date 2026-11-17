@@ -446,7 +446,7 @@ static void draw_one(const TsHud *h, int theme, const char *name) {
         log.json = fopen(path, "w");
         if (log.json) fprintf(log.json, "{\"w\":%d,\"h\":%d,\"texts\":[\n", w, hh);
     }
-    TsPhoneCanvas cv = {px, w, hh, record_text, measure_like_preview, &log, NULL, 0};
+    TsPhoneCanvas cv = {px, w, hh, record_text, measure_like_preview, &log};
     ts_phone_draw(h, theme, scale, "18:56", &cv);
     ts_phone_finish(theme, scale, &cv);
     CHECK(log.count >= 8 && log.outside == 0, "%s theme %d: %d texts, %d outside", name, theme, log.count, log.outside);
@@ -851,7 +851,7 @@ static void sign_one(int number, const char *unit, int flash, const char *name) 
         log.json = fopen(path, "w");
         if (log.json) fprintf(log.json, "{\"w\":%d,\"h\":%d,\"texts\":[\n", w, hh);
     }
-    TsPhoneCanvas cv = {px, w, hh, record_text, NULL, &log, NULL, 0};
+    TsPhoneCanvas cv = {px, w, hh, record_text, NULL, &log};
     ts_sign_draw(number, unit, flash, 1.0f, &cv);
     ts_sign_finish(1.0f, &cv);
     CHECK(log.count >= 1 && log.outside == 0, "%s: %d texts, %d outside", name, log.count, log.outside);
@@ -908,6 +908,14 @@ static void test_imperial_and_sign(void) {
     ts_car_sample(&c, DT, &car);
     ts_hud(&c, &h);
     CHECK(h.sign_over, "sign flashes when too fast");
+    /* 0.4.3: yellow a little over, red from 6 mph over the sign (Marvin: "only yellow, never red") */
+    for (int over = 1; over <= 12; ++over) {
+        car.vel[0] = ((float)(lim + over) * 1.609344f) / 3.6f;
+        for (int k = 0; k < 40; ++k) ts_car_sample(&c, DT, &car);
+        ts_hud(&c, &h);
+        int want_level = over > 6 ? 2 : over * 1.609344f > 2.0f ? 1 : 0;
+        CHECK(h.sign_over == want_level, "%d mph over: level %d (want %d)", over, h.sign_over, want_level);
+    }
     car.vel[0] = 0.0f;
     /* what passengers say about the limit is in mph too (Marvin's game: "75 km/h" in 0.4.1's first build) */
     TsEvent ev[TS_MAX_EVENTS];
@@ -964,7 +972,7 @@ static void dash_one(const TsHud *h, const char *name) {
         log.json = fopen(path, "w");
         if (log.json) fprintf(log.json, "{\"w\":%d,\"h\":%d,\"texts\":[\n", w, hh);
     }
-    TsPhoneCanvas cv = {px, w, hh, record_text, measure_like_preview, &log, NULL, 0};
+    TsPhoneCanvas cv = {px, w, hh, record_text, measure_like_preview, &log};
     ts_dash_draw(h, 1.0f, &cv);
     ts_dash_finish(1.0f, &cv);
     CHECK(log.count >= 3 && log.outside == 0, "%s: %d texts, %d outside", name, log.count, log.outside);
@@ -1022,7 +1030,7 @@ static void test_feed_window(void) {
         log.json = fopen(path, "w");
         if (log.json) fprintf(log.json, "{\"w\":%d,\"h\":%d,\"texts\":[\n", w, hh);
     }
-    TsPhoneCanvas cv = {px, w, hh, record_text, measure_like_preview, &log, NULL, 0};
+    TsPhoneCanvas cv = {px, w, hh, record_text, measure_like_preview, &log};
     ts_feed_draw(l, 3, 1.0f, &cv);
     ts_feed_finish(1.0f, &cv);
     CHECK(log.count >= 7 && log.outside == 0, "feed: %d texts, %d outside", log.count, log.outside);
@@ -1078,59 +1086,17 @@ static void test_dash(void) {
     ts_hud(&c, &h);
     CHECK(h.g_on && !h.g_over && h.g_long < 0.0f, "G-meter on with a passenger, inside the circle (%.2f, %.2f)", (double)h.g_lat, (double)h.g_long);
     dash_one(&h, "dash_ok");
-    c.acc_long = -8.0f, c.acc_lat = -1.0f;
+    c.acc_long = -10.0f, c.acc_lat = -1.0f;
     snprintf(c.job.passenger >= 0 ? h.chip3 : h.chip3, sizeof(h.chip3), "%s", "");
     ts_hud(&c, &h);
     CHECK(h.g_over, "hard braking: outside the circle");
     snprintf(h.chip3, sizeof(h.chip3), "%s", "Wish: a quick stop at the café");
     dash_one(&h, "dash_over");
+    h.sign_over = 2;
+    dash_one(&h, "dash_red");
     c.stage = TS_UBER_TO_PICKUP;
     ts_hud(&c, &h);
     CHECK(!h.g_on, "no G-meter before the passenger is in");
-}
-
-static void test_mouse_clicks(void) {
-    TsCore c;
-    ts_init(&c, 11u, 1);
-    ts_set_car(&c, "LAM_MiuraP400_67");
-    place_car(ts_places[0].pos);
-    wait_s(&c, 0.5f, 0);
-    ts_phone_toggle(&c);
-    TsHud h;
-    ts_hud(&c, &h);
-    /* the drawn phone says where its tabs and entries are */
-    int w, hh;
-    ts_phone_size(1.0f, &w, &hh);
-    static uint32_t px[1200 * 1600];
-    memset(px, 0, sizeof(uint32_t) * (size_t)w * hh);
-    TsPhoneHit hits[TS_PHONE_HITS];
-    TextLog log = {0};
-    log.w = w, log.h = hh;
-    TsPhoneCanvas cv = {px, w, hh, record_text, NULL, &log, hits, 0};
-    ts_phone_draw(&h, 0, 1.0f, "12:00", &cv);
-    int tabs = 0, entries = 0, inside = 1;
-    for (int i = 0; i < cv.hit_count; ++i) {
-        tabs += hits[i].tab >= 0, entries += hits[i].row >= 0;
-        inside &= hits[i].x >= 0 && hits[i].y >= 0 && hits[i].x + hits[i].w <= w && hits[i].y + hits[i].h <= hh;
-    }
-    CHECK(tabs == TS_TABS && entries >= c.offer_count && inside, "click areas: %d tabs, %d entries, inside %d", tabs, entries, inside);
-    /* a click on the second offer picks it, a second click takes it */
-    int row = -1, row2 = -1, seen = 0;
-    for (int i = 0; i < cv.hit_count; ++i)
-        if (hits[i].row >= 0 && seen++ == 1) row = hits[i].row, row2 = hits[i].row2;
-    ts_phone_click(&c, -1, row, row2);
-    CHECK(c.phone_sel == 1 && c.mode == TS_IDLE, "first click picks the 2nd offer (sel %d, mode %d)", c.phone_sel, c.mode);
-    ts_phone_click(&c, -1, row, row2);
-    CHECK(c.mode == TS_UBER, "second click takes it (mode %d)", c.mode);
-    ts_cancel(&c);
-    /* a tab */
-    c.phone_open = 1;
-    ts_phone_click(&c, TS_TAB_SHOP, -1, -1);
-    CHECK(c.phone_tab == TS_TAB_SHOP && c.phone_sel == 0, "tab click opens the shop (tab %d)", c.phone_tab);
-    /* a heading can't be picked */
-    int keep = c.phone_sel;
-    ts_phone_click(&c, -1, 0, -1);
-    CHECK(c.phone_sel == keep && c.mode == TS_IDLE, "a heading isn't picked");
 }
 
 static void test_complaints_switch(void) {
@@ -1232,6 +1198,158 @@ static void test_no_repeats_and_feed(void) {
     CHECK(too_long == 0, "%d lines too long", too_long);
 }
 
+
+/* 0.4.3: the passenger's door: which door, the order of the steps, the same door at the destination, driving off */
+typedef struct {
+    int steps[64], doors[64];
+    double at[64];
+    int n;
+} DoorLog;
+
+static double door_clock;
+static void door_events(TsCore *c, DoorLog *log) {
+    TsEvent ev[TS_MAX_EVENTS];
+    int n = ts_take_events(c, ev, TS_MAX_EVENTS);
+    for (int i = 0; i < n; ++i)
+        if (ev[i].kind == TS_EV_DOOR && log->n < 64) {
+            log->steps[log->n] = ev[i].sound, log->doors[log->n] = ev[i].style, log->at[log->n] = c->t;
+            log->n++;
+        }
+    (void)door_clock;
+}
+
+static void door_wait(TsCore *c, float seconds, DoorLog *log) {
+    for (int i = 0; i < (int)(seconds * 60.0f); ++i) {
+        frame(c, i);
+        door_events(c, log);
+    }
+}
+
+static int door_drive(TsCore *c, const float to[3], DoorLog *log) {
+    float v = 0.0f;
+    int frames = 0;
+    for (; frames < 60 * 60 * 30; ++frames) {
+        float dx = to[0] - car.pos[0], dz = to[2] - car.pos[2], d = sqrtf(dx * dx + dz * dz);
+        if (d < 8.0f && v < 0.3f) break;
+        float want = d < v * v / 6.0f + 6.0f ? 0.0f : 20.0f;
+        v = v < want ? fminf(want, v + 2.0f * DT) : fmaxf(want, v - 3.0f * DT);
+        if (d > 0.1f) car.fwd[0] = dx / d, car.fwd[2] = dz / d, car.right[0] = car.fwd[2], car.right[2] = -car.fwd[0];
+        car.vel[0] = car.fwd[0] * v, car.vel[2] = car.fwd[2] * v;
+        frame(c, frames);
+        door_events(c, log);
+    }
+    car.vel[0] = car.vel[1] = car.vel[2] = 0.0f;
+    return frames;
+}
+
+static void test_doors(void) {
+    /* the pick: four doors -> rear left, rear right, front passenger (by the wheel's side); two doors -> front passenger */
+    TsCore c;
+    ts_init(&c, 77u, 1);
+    CHECK(c.door == -1 && !c.doors_on, "doors off by default, none chosen");
+    CHECK(ts_uber_stop_s(&c, 1) == 3.0 && ts_uber_stop_s(&c, 0) == 2.0, "without doors: 3 s in, 2 s out as before");
+    CHECK(!strcmp(ts_door_name(TS_DOOR_RR), "doorRR") && !strcmp(ts_door_name(TS_DOOR_LF), "doorLF") && !ts_door_name(9)[0], "door names");
+    CHECK(ts_door_front_passenger(0) == TS_DOOR_RF && ts_door_front_passenger(1) == TS_DOOR_LF, "front passenger door by the wheel");
+    for (int rhd = 0; rhd < 2; ++rhd) {
+        int seen[TS_DOORS] = {0};
+        c.driver_right = rhd;
+        c.door_mask = 15;
+        for (int i = 0; i < 600; ++i) seen[ts_door_pick(&c)]++;
+        int driver = rhd ? TS_DOOR_RF : TS_DOOR_LF, front = rhd ? TS_DOOR_LF : TS_DOOR_RF;
+        CHECK(seen[driver] == 0, "never the driver's door (rhd %d)", rhd);
+        CHECK(seen[TS_DOOR_LR] > 120 && seen[TS_DOOR_RR] > 120 && seen[front] > 120, "all three passenger doors (rhd %d: %d %d %d)", rhd,
+              seen[TS_DOOR_LR], seen[TS_DOOR_RR], seen[front]);
+        c.door_mask = 1 << TS_DOOR_LF | 1 << TS_DOOR_RF; /* a coupé */
+        for (int i = 0; i < 50; ++i) CHECK(ts_door_pick(&c) == front, "two doors: the front passenger door");
+        c.door_mask = 0; /* not known: as four doors, for the sound */
+        int any_rear = 0;
+        for (int i = 0; i < 50; ++i) any_rear |= ts_door_pick(&c) >= TS_DOOR_LR;
+        CHECK(any_rear, "unknown doors: rear doors too");
+        c.door_mask = 1 << driver; /* only the driver's door animates: the passenger side for the sound */
+        CHECK(ts_door_pick(&c) == front, "only the driver's door: still the passenger side");
+    }
+
+    /* a whole ride with doors on */
+    ts_init(&c, 4242u, 0);
+    c.doors_on = 1;
+    c.door_mask = 15;
+    place_car(ts_places[0].pos);
+    DoorLog log = {0};
+    door_wait(&c, 0.5f, &log);
+    ts_phone_toggle(&c);
+    ts_phone_accept(&c);
+    CHECK(c.mode == TS_UBER, "ride started");
+    TsOffer offer = c.job;
+    door_drive(&c, ts_places[offer.pickup].pos, &log);
+    door_wait(&c, 0.2f, &log);
+    CHECK(c.stage == TS_UBER_BOARDING && log.n >= 1 && log.steps[0] == TS_DOOR_PREPARE, "boarding: prepare first (stage %d, %d)", c.stage, log.n);
+    int door = c.door;
+    CHECK(door >= 0 && door < TS_DOORS && door != TS_DOOR_LF, "a passenger door: %d", door);
+    TsHud h;
+    ts_hud(&c, &h);
+    CHECK(h.countdown >= 3 && h.countdown <= 4, "countdown covers the door: %d", h.countdown);
+    while (c.stage == TS_UBER_BOARDING && c.t - log.at[0] < 10.0) door_wait(&c, 0.1f, &log);
+    double in_s = c.t - log.at[0];
+    CHECK(c.stage == TS_UBER_TO_DEST && in_s >= 3.4 && in_s < 3.8, "ride on 3.5 s after stopping, after the door (%.2f s)", in_s);
+    CHECK(log.n == 5, "five steps at the pickup: %d", log.n);
+    for (int i = 0; i < log.n && i < 5; ++i) CHECK(log.steps[i] == TS_DOOR_PREPARE + i && log.doors[i] == door, "step %d: %d door %d", i, log.steps[i], log.doors[i]);
+    if (log.n == 5) {
+        CHECK(log.at[1] - log.at[0] >= 0.45 && log.at[1] - log.at[0] < 0.7, "opens after 0.5 s: %.2f", log.at[1] - log.at[0]);
+        CHECK(log.at[2] - log.at[1] >= 1.5 && log.at[2] - log.at[1] < 2.1, "open ~1.8 s: %.2f", log.at[2] - log.at[1]);
+        CHECK(log.at[3] - log.at[2] >= 0.5 && log.at[3] - log.at[2] < 0.75, "close sound 0.6 s after closing: %.2f", log.at[3] - log.at[2]);
+    }
+
+    /* at the destination: the same door; driving off with the door open closes it at once */
+    log.n = 0;
+    door_drive(&c, ts_places[offer.dest].pos, &log);
+    while (log.n < 2 && c.t < 1e6) door_wait(&c, 0.1f, &log);
+    door_wait(&c, 0.3f, &log);
+    CHECK(c.stage == TS_UBER_ALIGHTING && log.n == 2 && log.steps[1] == TS_DOOR_OPEN && log.doors[1] == door,
+          "the same door opens at the destination (stage %d, %d steps)", c.stage, log.n);
+    car.vel[2] = 8.0f; /* drives off */
+    door_wait(&c, 0.3f, &log);
+    car.vel[0] = car.vel[1] = car.vel[2] = 0.0f;
+    CHECK(c.stage == TS_UBER_TO_DEST, "drove off: not out yet");
+    CHECK(log.n == 5 && log.steps[2] == TS_DOOR_CLOSE && log.steps[3] == TS_DOOR_SHUT && log.steps[4] == TS_DOOR_DONE,
+          "drove off: close, shut, done at once (%d)", log.n);
+    log.n = 0;
+    door_drive(&c, ts_places[offer.dest].pos, &log);
+    long long before = c.wallet;
+    door_wait(&c, 2.0f, &log);
+    CHECK(c.mode == TS_UBER, "still getting out after 2 s (doors take longer)");
+    door_wait(&c, 2.0f, &log);
+    CHECK(c.mode == TS_IDLE && c.wallet > before, "paid after the door shut");
+    CHECK(log.n == 5 && log.steps[4] == TS_DOOR_DONE && log.doors[0] == door, "a full sequence at the destination (%d)", log.n);
+
+    /* cancelled with the door open: it closes and the car's animation goes back */
+    ts_init(&c, 99u, 0);
+    c.doors_on = 1;
+    place_car(ts_places[0].pos);
+    log.n = 0;
+    door_wait(&c, 0.5f, &log);
+    ts_phone_toggle(&c);
+    ts_phone_accept(&c);
+    offer = c.job;
+    door_drive(&c, ts_places[offer.pickup].pos, &log);
+    door_wait(&c, 1.5f, &log);
+    ts_cancel(&c);
+    door_events(&c, &log);
+    CHECK(log.n >= 4 && log.steps[log.n - 1] == TS_DOOR_DONE && log.steps[log.n - 2] == TS_DOOR_SHUT, "cancel: the door closes (%d)", log.n);
+    door_wait(&c, 3.0f, &log);
+    CHECK(log.steps[log.n - 1] == TS_DOOR_DONE, "nothing after the cancel");
+
+    /* doors off: no door events, timings as before */
+    ts_init(&c, 4242u, 0);
+    place_car(ts_places[0].pos);
+    log.n = 0;
+    door_wait(&c, 0.5f, &log);
+    ts_phone_toggle(&c);
+    ts_phone_accept(&c);
+    door_drive(&c, ts_places[c.job.pickup].pos, &log);
+    door_wait(&c, 3.6f, &log);
+    CHECK(c.stage == TS_UBER_TO_DEST && log.n == 0, "doors off: in after 3 s, no door (stage %d, %d)", c.stage, log.n);
+}
+
 int main(int argc, char **argv) {
     (void)argv;
     int verbose = argc > 1;
@@ -1262,11 +1380,11 @@ int main(int argc, char **argv) {
     test_place_names();
     test_no_repeats_and_feed();
     test_complaints_switch();
-    test_mouse_clicks();
     test_dash();
     test_quiet_passengers();
     test_feed_window();
     test_ride_variety();
+    test_doors();
     printf("%d checks, %d failures\n", checks, failures);
     return failures != 0;
 }

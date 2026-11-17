@@ -20,13 +20,6 @@ typedef struct {
     int wrap;         /* nonzero: word-wrapped from the box's top, up to its height */
 } TsPhoneText;
 
-/* where the mouse can click on the drawn phone: a tab (tab >= 0) or an entry (row: its TsHud row, row2: its second line, -1 none) */
-#define TS_PHONE_HITS 16
-typedef struct {
-    int x, y, w, h; /* pixels of the buffer */
-    int tab, row, row2;
-} TsPhoneHit;
-
 typedef struct {
     uint32_t *px;     /* w*h pixels, 0xAARRGGBB, top row first; must start all zero */
     int w, h;
@@ -34,8 +27,6 @@ typedef struct {
     /* the width in pixels the text needs (t->w, t->x and t->align are ignored); NULL = estimated */
     int (*measure)(void *user, const TsPhoneText *t);
     void *user;
-    TsPhoneHit *hits; /* NULL = not wanted; else room for TS_PHONE_HITS, hit_count set by the drawing */
-    int hit_count;
 } TsPhoneCanvas;
 
 /* the buffer's size at this scale (1 = a 1080-line picture), shadow margin included */

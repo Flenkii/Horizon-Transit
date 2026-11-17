@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <xmmintrin.h>
+#include <math.h>
 
 #include "../third_party/fh2mod/fh2mod.h"
 #include "../third_party/fh2mod/fh2mod_hud.h"
@@ -33,9 +34,10 @@
 #include "phone_window.h"
 #include "voice.h"
 #include "phone_draw.h"
+#include "door_sounds.h" /* the door sounds, built in by build.py from sounds/ */
 
 #define MOD_NAME "Horizon Transit"
-#define MOD_VERSION "0.4.2"
+#define MOD_VERSION "0.4.3"
 #define MOD_FOLDER L"TransportSim"
 
 /* ------------------------------------------------------------------ game addresses (checked below) */
@@ -104,10 +106,15 @@ static int opt_language = 0;                                        /* 0 the gam
 static const int opt_arrow_keys = 1; /* the phone always takes the arrow keys, Enter and Backspace while it's open (0.4.1: no switch any more) */
 static int opt_bus_needs_bus = 1; /* bus lines only in the game's bus */
 static int opt_dash = 1, opt_dash_right = 410, opt_dash_bottom = 110; /* 0.4.2: the ride panel by the speedometer */
-static int opt_mouse = 1;         /* 0.4.1: click the phone with the mouse */
 static int opt_voices = 0;        /* 0.4.1: passengers read out by Windows speech: 0 off, 1 quiet, 2 normal, 3 loud */
 static int opt_complaints = 1;    /* 0.4.1: passengers remark on the driving */
 static int opt_extras = 1;        /* 0.4: reputation effects, special rides, wishes */
+static int opt_doors = 1;         /* 0.4.3: the mod-menu switch "Passenger doors", on by default */
+static int opt_door_anim = 1;     /* [Doors] Animate: 0 = only the sounds */
+static int opt_door_shut_ms = 600; /* [Doors] ShutDelayMs: close -> the close sound */
+static int opt_door_volume = 80;  /* [Doors] Volume 0..100 (our sound files) */
+static char learned_sides[2048];  /* [Doors] Learned: "MEDIA=L,MEDIA=R," (see "which side the wheel is on") */
+static char opt_rhd[1024];        /* [Doors] RightHandDrive: media names of cars with the wheel on the right, comma separated */
 static int opt_phone_style = 0;   /* 0 Night, 1 Light, 2 Festival (the phone window; the HUD list only when it can't be made) */
 static uint32_t key_vk[3] = {VK_F9, VK_F10, VK_F11}, key_mod[3], key_pad[3] = {
     FH2_PAD_LB | FH2_PAD_RB | FH2_PAD_DPAD_UP, FH2_PAD_LB | FH2_PAD_RB | FH2_PAD_DPAD_RIGHT, FH2_PAD_LB | FH2_PAD_RB | FH2_PAD_A};
@@ -115,7 +122,6 @@ static const char *const key_names[3] = {"Phone", "Next", "Accept"};
 
 /* asked by keys / the page, done by the worker under the lock */
 static volatile LONG want_tab; /* -1 / +1 */
-static volatile LONG want_click = -1; /* a mouse click: tab | row << 8 | (row2 + 1) << 16, -1 none */
 static volatile LONG want_toggle, want_next, want_prev, want_accept, want_row = -1, want_cancel;
 static volatile LONG phone_is_open; /* copied from the core by the worker */
 
@@ -182,7 +188,6 @@ static void load_settings(void) {
     opt_bus_autoshow = ini_int("Settings", "BusInAutoshow", 0) != 0;
     opt_extras = ini_int("Settings", "CareerExtras", 1) != 0;
     opt_complaints = ini_int("Settings", "Complaints", 1) != 0;
-    opt_mouse = ini_int("Settings", "PhoneMouse", 1) != 0;
     opt_dash = ini_int("Settings", "RidePanel", 1) != 0;
     opt_dash_right = ini_int("Settings", "RidePanelRight", 410);
     if (opt_dash_right == 300) opt_dash_right = 410; /* the first guess sat on the speedometer */
@@ -190,6 +195,20 @@ static void load_settings(void) {
     if (opt_dash_bottom == 24) opt_dash_bottom = 110;
     opt_voices = ini_int("Settings", "Voices", 0);
     if (opt_voices < 0 || opt_voices > 3) opt_voices = 0;
+    opt_doors = ini_int("Settings", "PassengerDoors", 1) != 0;
+    opt_door_anim = ini_int("Doors", "Animate", 1) != 0;
+    opt_door_shut_ms = ini_int("Doors", "ShutDelayMs", 600);
+    if (opt_door_shut_ms < 100 || opt_door_shut_ms > 2500) opt_door_shut_ms = 600;
+    opt_door_volume = ini_int("Doors", "Volume", 80);
+    if (opt_door_volume < 0 || opt_door_volume > 100) opt_door_volume = 80;
+    {
+        wchar_t list[1024];
+        GetPrivateProfileStringW(L"Doors", L"RightHandDrive", L"", list, 1024, ini_path);
+        WideCharToMultiByte(CP_UTF8, 0, list, -1, opt_rhd, sizeof(opt_rhd), NULL, NULL);
+        wchar_t learned[2048];
+        GetPrivateProfileStringW(L"Doors", L"Learned", L"", learned, 2048, ini_path);
+        WideCharToMultiByte(CP_UTF8, 0, learned, -1, learned_sides, sizeof(learned_sides), NULL, NULL);
+    }
     opt_time_limit = ini_int("Settings", "TimeLimit", 1);
     if (opt_time_limit < 0 || opt_time_limit > 2) opt_time_limit = 1;
     opt_phone_style = ini_int("Settings", "PhoneStyle", 0);
@@ -214,7 +233,18 @@ static void save_settings(void) {
     ini_put_int("Settings", "CareerExtras", opt_extras);
     ini_put_int("Settings", "Complaints", opt_complaints);
     ini_put_int("Settings", "Voices", opt_voices);
-    ini_put_int("Settings", "PhoneMouse", opt_mouse);
+    ini_put_int("Settings", "PassengerDoors", opt_doors);
+    ini_put_int("Doors", "Animate", opt_door_anim);
+    ini_put_int("Doors", "ShutDelayMs", opt_door_shut_ms);
+    ini_put_int("Doors", "Volume", opt_door_volume);
+    {
+        wchar_t list[1024];
+        MultiByteToWideChar(CP_UTF8, 0, opt_rhd, -1, list, 1024);
+        WritePrivateProfileStringW(L"Doors", L"RightHandDrive", list, ini_path);
+        wchar_t learned[2048];
+        MultiByteToWideChar(CP_UTF8, 0, learned_sides, -1, learned, 2048);
+        WritePrivateProfileStringW(L"Doors", L"Learned", learned, ini_path);
+    }
     ini_put_int("Settings", "RidePanel", opt_dash);
     ini_put_int("Settings", "RidePanelRight", opt_dash_right);
     ini_put_int("Settings", "RidePanelBottom", opt_dash_bottom);
@@ -397,6 +427,11 @@ static int car_media_name(unsigned char *car, char *out, size_t size) {
 
 static void *named_car;
 static unsigned name_checks;
+static int door_probe(unsigned char *car, int *mask_out);
+static int car_side(unsigned char *car, const char *media, const TsCar *s);
+static volatile LONG want_save_sides;
+static int car_is_rhd(const char *media);
+static void door_game_step(unsigned char *car);
 static char car_media[48];
 
 static void car_update(void *car, float dt, float frame_dt, unsigned frame) {
@@ -424,10 +459,16 @@ static void car_update(void *car, float dt, float frame_dt, unsigned frame) {
         named_car = car;
         if (!car_media_name(c, media, sizeof(media))) media[0] = 0;
     }
+    int door_mask = -1;
+    if (opt_doors && opt_door_anim && door_probe(c, &door_mask) == 0) door_mask = -1;
+    int right = opt_doors ? car_side(c, car_media, &sample) : -1;
     AcquireSRWLockExclusive(&lock);
     ts_car_sample(&core, dt, &sample);
     if (read_name) ts_set_car(&core, media);
+    if (right >= 0) core.driver_right = right;
+    if (door_mask >= 0) core.door_mask = door_mask;
     ReleaseSRWLockExclusive(&lock);
+    door_game_step(c);
     if (read_name && strcmp(media, car_media)) {
         snprintf(car_media, sizeof(car_media), "%s", media);
         const TsCarInfo *info = ts_car_find(media);
@@ -437,6 +478,386 @@ static void car_update(void *car, float dt, float frame_dt, unsigned frame) {
                       info ? info->cost : 0, kinds[info ? info->kind : 1]);
     }
     InterlockedIncrement(&car_samples);
+}
+
+/* ------------------------------------------------------------------ the game: the passenger's door (0.4.3)
+
+   The game's showroom (ForzaVista) opens a car's doors with named events of the car's animation graph:
+   "doorLF:open", "doorRR:close" (some cars: "<part>:toggle"). How the graph is reached and driven was documented
+   by Extra Options for this game (docs/VEHICLE_CONTROLS_NOTES.md, its roof): the car's animator at car+0x4D40,
+   its graph at animator+0x1C8; the graph's events are an unordered_map at graph+0x268 (its list head first, then
+   its size); the car's event dispatcher game+0xF5D300 (car, name). In free roam the graph runs its driving branch
+   (detail 1), which ignores the showroom's events: detail 0 (setter game+0x16FBE90, graph+0x10) switches it to the
+   showroom branch for as long as it's needed, ~0.25 s to blend. No code of Extra Options is used here (it has no
+   licence): only these facts, re-written. The event list is read here directly (no game call to look names up).
+
+   The core (doors.c) sends PREPARE, OPEN, CLOSE, SHUT, DONE; the worker plays the sounds and queues the rest for
+   the game thread, which does them in the own car's update. */
+#define CAR_ANIMATOR 0x4D40u
+#define ANIMATOR_GRAPH 0x1C8u
+#define GRAPH_DETAIL 0x10u
+#define GRAPH_EVENTS 0x268u
+#define RVA_CAR_ANIM_EVENT 0xF5D300u
+#define RVA_GRAPH_SET_DETAIL 0x16FBE90u
+typedef void (*CarAnimEventFn)(void *car, const char *name);
+typedef void (*GraphSetDetailFn)(void *graph, int detail);
+
+static int door_calls_ok = -1;       /* the two game functions look like code (checked once) */
+
+/* game thread: what the worker queued */
+static SRWLOCK door_lock = SRWLOCK_INIT;
+static int door_queue[8][2], door_queued; /* {step, door} */
+/* game thread only */
+static void *door_car, *door_graph;
+static int door_prev_detail = 1, door_forcing, door_has_toggle;
+static void *probed_graph;
+static unsigned probe_frames; /* own-car updates since the graph changed */
+static int probe_done;
+
+/* names in the graph's event list: calls found(name, size, user) for each, returns how many (-1: not readable) */
+static int graph_events(unsigned char *graph, void (*found)(const char *, size_t, void *), void *user) {
+    if (!readable(graph + GRAPH_EVENTS, 16)) return -1;
+    unsigned char *head = *(unsigned char **)(graph + GRAPH_EVENTS);
+    size_t size = *(size_t *)(graph + GRAPH_EVENTS + 8);
+    if (!readable(head, 16) || size > 4096) return -1;
+    unsigned char *node = *(unsigned char **)head;
+    size_t n = 0;
+    while (node && node != head && n <= size) {
+        if (!readable(node, 0x30)) return -1;
+        size_t len = *(size_t *)(node + 0x20), cap = *(size_t *)(node + 0x28);
+        const char *text = cap >= 16 ? *(const char **)(node + 0x10) : (const char *)(node + 0x10);
+        if (len < 64 && readable(text, len + 1)) found(text, len, user);
+        node = *(unsigned char **)node;
+        n++;
+    }
+    return node == head ? (int)n : -1;
+}
+
+typedef struct {
+    int open[TS_DOORS], close[TS_DOORS], toggle[TS_DOORS];
+    char names[480];
+} DoorProbe;
+
+static void door_found(const char *text, size_t len, void *user) {
+    DoorProbe *p = (DoorProbe *)user;
+    for (int d = 0; d < TS_DOORS; ++d) {
+        const char *name = ts_door_name(d);
+        size_t k = strlen(name);
+        if (len > k + 1 && !memcmp(text, name, k) && text[k] == ':') {
+            const char *what = text + k + 1;
+            size_t wl = len - k - 1;
+            if (wl == 4 && !memcmp(what, "open", 4)) p->open[d] = 1;
+            else if (wl == 5 && !memcmp(what, "close", 5)) p->close[d] = 1;
+            else if (wl == 6 && !memcmp(what, "toggle", 6)) p->toggle[d] = 1;
+        }
+    }
+    /* for the log: every showroom part event ("roof:open", "doorLF:open", "hood:open" ...) */
+    const char *colon = memchr(text, ':', len);
+    if (colon && (size_t)(colon - text) + 5 == len && !memcmp(colon, ":open", 5)) {
+        size_t used = strlen(p->names);
+        if (used + len + 3 < sizeof(p->names)) snprintf(p->names + used, sizeof(p->names) - used, "%s%.*s", used ? ", " : "", (int)len, text);
+    }
+}
+
+static unsigned char *car_graph(unsigned char *car) {
+    if (!readable(car + CAR_ANIMATOR, 8)) return NULL;
+    unsigned char *animator = *(unsigned char **)(car + CAR_ANIMATOR);
+    if (!readable(animator + ANIMATOR_GRAPH, 8)) return NULL;
+    unsigned char *graph = *(unsigned char **)(animator + ANIMATOR_GRAPH);
+    return readable(graph, GRAPH_EVENTS + 16) ? graph : NULL;
+}
+
+/* the start of a function the mod calls without its own hook: a known first byte of code, in an executable section */
+static int looks_like_code(unsigned rva) {
+    MEMORY_BASIC_INFORMATION info;
+    unsigned char *p = game + rva;
+    if (!VirtualQuery(p, &info, sizeof(info)) || !(info.Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE)))
+        return 0;
+    char bytes[64];
+    for (int i = 0; i < 16; ++i) snprintf(bytes + 3 * i, 4, "%02X ", p[i]);
+    log_line("doors: game+0x%X starts %s", rva, bytes);
+    return p[0] != 0xCC && p[0] != 0x00 && p[0] != 0xC3;
+}
+
+static int doors_callable(void) {
+    if (door_calls_ok < 0)
+        door_calls_ok = car_hook_on && looks_like_code(RVA_CAR_ANIM_EVENT) && looks_like_code(RVA_GRAPH_SET_DETAIL);
+    return door_calls_ok;
+}
+
+/* game thread, own car: which doors this car can open (when the car or its graph changes, and until the list is filled) */
+static int door_probe(unsigned char *car, int *mask_out) {
+    unsigned char *graph = car_graph(car);
+    if (graph != probed_graph) probed_graph = graph, probe_frames = 0, probe_done = 0;
+    if (probe_done || (probe_frames++ % 60) != 0) return 0; /* about once a second until the list is read */
+    DoorProbe p;
+    memset(&p, 0, sizeof(p));
+    int n = graph ? graph_events(graph, door_found, &p) : -1;
+    if (n <= 0 && probe_frames < 10 * 60) return 0; /* not filled yet: again later (10 s at most) */
+    probe_done = 1;
+    char name[48];
+    if (!car_media_name(car, name, sizeof(name))) snprintf(name, sizeof(name), "?");
+    int mask = 0;
+    for (int d = 0; d < TS_DOORS; ++d)
+        if (p.toggle[d] || (p.open[d] && p.close[d])) mask |= 1 << d;
+    *mask_out = mask;
+    log_line("doors: car %s, %d animation events, doors that open: %s%s%s%s%s; showroom parts: %s", name, n,
+             mask & 1 ? "LF " : "", mask & 2 ? "RF " : "", mask & 4 ? "LR " : "", mask & 8 ? "RR " : "", mask ? "" : "none",
+             p.names[0] ? p.names : "none");
+    return 1;
+}
+
+/* the media name is on the right-hand-drive list ([Doors] RightHandDrive) */
+static int car_is_rhd(const char *media) {
+    size_t n = strlen(media);
+    if (!n) return 0;
+    for (const char *p = opt_rhd; *p;) {
+        while (*p == ' ' || *p == ',' || *p == ';') ++p;
+        const char *end = p;
+        while (*end && *end != ',' && *end != ';' && *end != ' ') ++end;
+        if ((size_t)(end - p) == n && !_strnicmp(p, media, n)) return 1;
+        p = end;
+    }
+    return 0;
+}
+
+static void door_fire(unsigned char *car, int door, int open) {
+    char name[24];
+    const char *what = door_has_toggle ? "toggle" : open ? "open" : "close";
+    snprintf(name, sizeof(name), "%s:%s", ts_door_name(door), what);
+    ((CarAnimEventFn)(game + RVA_CAR_ANIM_EVENT))(car, name);
+    log_line("doors: %s", name);
+}
+
+/* game thread, own car, after its update */
+static void door_game_step(unsigned char *car) {
+    int queue[8][2], n;
+    AcquireSRWLockExclusive(&door_lock);
+    n = door_queued;
+    memcpy(queue, door_queue, sizeof(queue));
+    door_queued = 0;
+    ReleaseSRWLockExclusive(&door_lock);
+    unsigned char *graph = door_forcing || n ? car_graph(car) : NULL;
+    if (door_forcing && (car != door_car || graph != door_graph)) door_forcing = 0; /* another car: nothing to give back */
+    for (int i = 0; i < n; ++i) {
+        int step = queue[i][0], door = queue[i][1];
+        if (step == TS_DOOR_PREPARE) {
+            if (!graph || !doors_callable()) {
+                log_line("doors: no animation (%s)", graph ? "the game functions aren't as expected" : "the car's animation wasn't found");
+                continue;
+            }
+            DoorProbe p;
+            memset(&p, 0, sizeof(p));
+            graph_events(graph, door_found, &p);
+            if (!p.toggle[door] && !(p.open[door] && p.close[door])) {
+                log_line("doors: this car has no %s animation: only the sound", ts_door_name(door));
+                continue;
+            }
+            door_has_toggle = !(p.open[door] && p.close[door]);
+            if (!door_forcing) door_prev_detail = *(int *)(graph + GRAPH_DETAIL);
+            door_car = car, door_graph = graph, door_forcing = 1;
+            ((GraphSetDetailFn)(game + RVA_GRAPH_SET_DETAIL))(graph, 0);
+            log_line("doors: showroom detail on (was %d)", door_prev_detail);
+        } else if (!door_forcing) {
+            continue;
+        } else if (step == TS_DOOR_OPEN) {
+            door_fire(car, door, 1);
+        } else if (step == TS_DOOR_CLOSE) {
+            door_fire(car, door, 0);
+        } else if (step == TS_DOOR_DONE) {
+            door_forcing = 0;
+            int back = door_prev_detail >= 0 && door_prev_detail <= 2 ? door_prev_detail : 1;
+            ((GraphSetDetailFn)(game + RVA_GRAPH_SET_DETAIL))(graph, back);
+            log_line("doors: detail back to %d", back);
+        }
+    }
+    /* the game may set its own detail again meanwhile: keep the showroom branch while the door moves */
+    if (door_forcing && graph && *(int *)(graph + GRAPH_DETAIL) != 0) ((GraphSetDetailFn)(game + RVA_GRAPH_SET_DETAIL))(graph, 0);
+}
+
+/* worker: queue a step for the game thread */
+static void door_queue_step(int step, int door) {
+    if (!opt_door_anim || step == TS_DOOR_SHUT) return;
+    AcquireSRWLockExclusive(&door_lock);
+    if (door_queued < 8) door_queue[door_queued][0] = step, door_queue[door_queued][1] = door, door_queued++;
+    ReleaseSRWLockExclusive(&door_lock);
+}
+
+/* the sounds: built into the DLL (sounds/door_open.wav, door_close.wav); own WAV files in <Azimuth>\TransportSim\sounds\ replace them
+   (16-bit PCM WAV; any other WAV plays at its own volume) */
+typedef BOOL(WINAPI *PlaySoundWFn)(LPCWSTR, HMODULE, DWORD);
+#define TS_SND_ASYNC 0x0001u     /* mmsystem.h: SND_ASYNC, SND_NODEFAULT, SND_MEMORY */
+#define TS_SND_NODEFAULT 0x0002u
+#define TS_SND_MEMORY 0x0004u
+static PlaySoundWFn play_sound;
+static unsigned char *door_wav[2];
+static wchar_t sound_folder[MAX_PATH];
+
+/* a copy of a WAV at the volume (16-bit PCM samples in its "data" chunk scaled), or NULL if it isn't a WAV */
+static unsigned char *wav_copy(const unsigned char *src, DWORD size, int volume) {
+    if (size <= 44 || size >= 8u << 20 || memcmp(src, "RIFF", 4) || memcmp(src + 8, "WAVE", 4)) return NULL;
+    unsigned char *data = (unsigned char *)malloc(size);
+    if (!data) return NULL;
+    memcpy(data, src, size);
+    int format = 0, bits = 0;
+    for (DWORD at = 12; at + 8 <= size;) {
+        DWORD len = *(DWORD *)(data + at + 4);
+        if (!memcmp(data + at, "fmt ", 4) && len >= 16 && at + 8 + 16 <= size) {
+            format = *(uint16_t *)(data + at + 8);
+            bits = *(uint16_t *)(data + at + 22);
+        } else if (!memcmp(data + at, "data", 4) && format == 1 && bits == 16 && volume < 100) {
+            int16_t *s = (int16_t *)(data + at + 8);
+            DWORD count = (len < size - at - 8 ? len : size - at - 8) / 2;
+            for (DWORD i = 0; i < count; ++i) s[i] = (int16_t)(s[i] * volume / 100);
+        }
+        at += 8 + len + (len & 1);
+    }
+    return data;
+}
+
+/* an own sound file instead of the built-in one (TransportSim\sounds\door_open.wav / door_close.wav), if there is one */
+static unsigned char *load_wav(const wchar_t *path, int volume) {
+    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (file == INVALID_HANDLE_VALUE) return NULL;
+    DWORD size = GetFileSize(file, NULL), read = 0;
+    unsigned char *raw = size > 44 && size < 8u << 20 ? (unsigned char *)malloc(size) : NULL, *data = NULL;
+    if (raw && ReadFile(file, raw, size, &read, NULL) && read == size) data = wav_copy(raw, size, volume);
+    free(raw);
+    CloseHandle(file);
+    return data;
+}
+
+static void doors_load_sounds(void) {
+    if (!play_sound) {
+        HMODULE winmm = LoadLibraryW(L"winmm.dll");
+        play_sound = winmm ? (PlaySoundWFn)(void *)GetProcAddress(winmm, "PlaySoundW") : NULL;
+    }
+    static const wchar_t *const files[2] = {L"door_open.wav", L"door_close.wav"};
+    static const unsigned char *const built_in[2] = {ts_door_open_wav, ts_door_close_wav};
+    static const DWORD built_in_size[2] = {sizeof(ts_door_open_wav), sizeof(ts_door_close_wav)};
+    for (int i = 0; i < 2; ++i) {
+        wchar_t path[MAX_PATH];
+        free(door_wav[i]);
+        door_wav[i] = NULL;
+        if (sound_folder[0] && _snwprintf(path, MAX_PATH, L"%ls\\%ls", sound_folder, files[i]) > 0) door_wav[i] = load_wav(path, opt_door_volume);
+        if (door_wav[i]) log_line("doors: own sound %ls", path);
+        else door_wav[i] = wav_copy(built_in[i], built_in_size[i], opt_door_volume);
+    }
+}
+
+static void door_sound(int shut) {
+    if (play_sound && door_wav[shut]) play_sound((LPCWSTR)door_wav[shut], NULL, TS_SND_MEMORY | TS_SND_ASYNC | TS_SND_NODEFAULT);
+}
+
+/* worker: a door step from the core */
+static void door_deliver(const TsEvent *e) {
+    if (e->sound == TS_DOOR_OPEN) door_sound(0);
+    else if (e->sound == TS_DOOR_SHUT) door_sound(1);
+    door_queue_step(e->sound, e->style);
+}
+
+/* ------------------------------------------------------------------ the game: which side the wheel is on (0.4.3)
+
+   As Gripline for FH2 does it (seen in its log and DLL, no code used): the game's inside cameras ("driver", vtable
+   game+0x2E78120, and "cockpit", game+0x2E77C30) keep their world position as three doubles at +0x1A0. Their view
+   function (vtable slot +0x50, game+0x103C590, (camera, out) -> out) runs every frame while one is active. Seen from
+   the car, a camera more than 10 cm right of the middle (along the car's right axis) means the wheel is on the right.
+   The mod looks while the player drives in one of those views and remembers the answer per car
+   ([Doors] Learned in TransportSim.ini); [Doors] RightHandDrive always wins. Until a car was seen: wheel on the left. */
+#define RVA_CAM_VT_DRIVER 0x2E78120u
+#define RVA_CAM_VT_COCKPIT 0x2E77C30u
+#define CAM_VIEW_SLOT 0x50u
+#define RVA_CAM_VIEW_INSIDE 0x103C590u
+#define CAM_POSITION 0x1A0u
+typedef void *(*CamViewFn)(void *camera, void *out, void *r8, void *r9);
+static CamViewFn original_cam_view;
+static int cam_hook_tried, cam_hook_on;
+static SRWLOCK cam_lock = SRWLOCK_INIT;
+static double cam_pos[3];
+static ULONGLONG cam_at;
+static char side_car[48];
+static int side_votes; /* + right, - left, for side_car */
+static int side_known = -1; /* the side of side_car: -1 not known, 0 left, 1 right */
+
+static void *cam_view(void *camera, void *out, void *r8, void *r9) {
+    void *result = original_cam_view(camera, out, r8, r9);
+    unsigned char *c = (unsigned char *)camera;
+    if (c && readable(c, CAM_POSITION + 24)) {
+        void *vt = *(void **)c;
+        if (vt == game + RVA_CAM_VT_DRIVER || vt == game + RVA_CAM_VT_COCKPIT) {
+            const double *p = (const double *)(c + CAM_POSITION);
+            AcquireSRWLockExclusive(&cam_lock);
+            cam_pos[0] = p[0], cam_pos[1] = p[1], cam_pos[2] = p[2];
+            cam_at = GetTickCount64();
+            ReleaseSRWLockExclusive(&cam_lock);
+        }
+    }
+    return result;
+}
+
+/* worker: hook the inside cameras' view function once "Passenger doors" is on */
+static void side_hook(void) {
+    if (cam_hook_tried || !opt_doors || !car_hook_on || api->api_version < 3) return;
+    cam_hook_tried = 1;
+    void *slot_driver = *(void **)(game + RVA_CAM_VT_DRIVER + CAM_VIEW_SLOT), *slot_cockpit = *(void **)(game + RVA_CAM_VT_COCKPIT + CAM_VIEW_SLOT);
+    int ours = slot_driver == game + RVA_CAM_VIEW_INSIDE || slot_cockpit == game + RVA_CAM_VIEW_INSIDE;
+    if (!ours && (slot_driver != slot_cockpit)) { /* both patched by the same other mod (Gripline) is fine: it calls the game's function */
+        log_line("doors: the inside cameras' view function isn't where expected - wheel side from the INI only");
+        return;
+    }
+    if (!looks_like_code(RVA_CAM_VIEW_INSIDE)) {
+        log_line("doors: game+0x%X doesn't look like code - wheel side from the INI only", RVA_CAM_VIEW_INSIDE);
+        return;
+    }
+    FH2Hook *hook = api->hook_function(mod, "inside camera view (Transport: which side the wheel is on)", game + RVA_CAM_VIEW_INSIDE,
+                                       (void *)cam_view, (void **)&original_cam_view);
+    cam_hook_on = hook && original_cam_view && api->enable_hooks(mod, hook);
+    log_line(cam_hook_on ? "doors: inside camera hooked%s - drive a moment in the driver or cockpit view and each car's wheel side is learned"
+                         : "doors: inside camera NOT hooked%s - wheel side from the INI only", ours ? "" : " (through another mod's camera hook)");
+}
+
+/* "MEDIA=R" in the learned list: 1 right, 0 left, -1 not there */
+static int learned_side(const char *media) {
+    size_t n = strlen(media);
+    if (!n) return -1;
+    for (const char *p = learned_sides; (p = strstr(p, media)) != NULL; p += n)
+        if ((p == learned_sides || p[-1] == ',') && p[n] == '=') return p[n + 1] == 'R';
+    return -1;
+}
+
+/* game thread, own car: the side of this car (manual list, learned, or the camera now); returns 1 right, 0 left */
+static int car_side(unsigned char *car, const char *media, const TsCar *s) {
+    (void)car;
+    if (!media[0]) return 0;
+    if (car_is_rhd(media)) return 1;
+    if (strcmp(media, side_car)) {
+        snprintf(side_car, sizeof(side_car), "%s", media);
+        side_votes = 0;
+        side_known = learned_side(media);
+    }
+    if (side_known >= 0 || !cam_hook_on) return side_known > 0;
+    double p[3];
+    ULONGLONG at;
+    AcquireSRWLockShared(&cam_lock);
+    p[0] = cam_pos[0], p[1] = cam_pos[1], p[2] = cam_pos[2], at = cam_at;
+    ReleaseSRWLockShared(&cam_lock);
+    if (!at || GetTickCount64() - at > 300) return 0;
+    double d[3] = {p[0] - s->pos[0], p[1] - s->pos[1], p[2] - s->pos[2]};
+    double dist = sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (!(dist < 3.0)) return 0; /* another car's camera, or a moment after a change */
+    double x = d[0] * s->right[0] + d[1] * s->right[1] + d[2] * s->right[2];
+    if (x > 0.10) side_votes = side_votes < 0 ? 1 : side_votes + 1;
+    else if (x < -0.10) side_votes = side_votes > 0 ? -1 : side_votes - 1;
+    if (side_votes >= 60 || side_votes <= -60) { /* a second in the same view */
+        side_known = side_votes > 0;
+        size_t used = strlen(learned_sides);
+        if (used + strlen(media) + 4 < sizeof(learned_sides))
+            snprintf(learned_sides + used, sizeof(learned_sides) - used, "%s=%c,", media, side_known ? 'R' : 'L');
+        InterlockedExchange(&want_save_sides, 1);
+        log_line("doors: %s - the wheel is on the %s (inside camera %.2f m %s of the middle)", media, side_known ? "RIGHT" : "left", fabs(x),
+                 x > 0 ? "right" : "left");
+    }
+    return side_known > 0;
 }
 
 /* ------------------------------------------------------------------ the game: the GPS */
@@ -589,14 +1010,6 @@ static void play(int which) {
     if (sound && api->api_version >= 10) api->play_ui_sound(mod, sound);
 }
 
-/* the phone window's thread: a click, the wheel */
-static void phone_clicked(int tab, int row, int row2) {
-    InterlockedExchange(&want_click, (LONG)((tab + 1) | (row + 1) << 8 | (row2 + 1) << 16));
-}
-static void phone_wheel(int direction) {
-    InterlockedExchange(direction < 0 ? &want_prev : &want_next, 1);
-}
-
 /* "Voices": the volume of each choice */
 static void apply_voices(void) {
     static const int volumes[4] = {0, 45, 75, 100};
@@ -642,6 +1055,8 @@ static void deliver(const TsEvent *e, int german) {
         }
     } else if (e->kind == TS_EV_SOUND) {
         play(e->sound);
+    } else if (e->kind == TS_EV_DOOR) {
+        door_deliver(e);
     }
 }
 
@@ -912,6 +1327,8 @@ static DWORD WINAPI worker(LPVOID unused) {
         core.bus_needs_bus = opt_bus_needs_bus;
         core.extras_off = !opt_extras;
         core.complaints_off = !opt_complaints;
+        core.doors_on = opt_doors;
+        core.door_shut_s = (float)opt_door_shut_ms / 1000.0f;
         if (imperial >= 0) core.imperial = imperial;
         if (InterlockedExchange(&want_toggle, 0)) ts_phone_toggle(&core);
         if (InterlockedExchange(&want_next, 0)) ts_phone_next(&core);
@@ -919,8 +1336,6 @@ static DWORD WINAPI worker(LPVOID unused) {
         LONG tab = InterlockedExchange(&want_tab, 0);
         if (tab) ts_phone_tab(&core, (int)tab);
         if (InterlockedExchange(&want_accept, 0)) ts_phone_accept(&core);
-        LONG click = InterlockedExchange(&want_click, -1);
-        if (click >= 0) ts_phone_click(&core, (int)(click & 255) - 1, (int)(click >> 8 & 255) - 1, (int)(click >> 16 & 255) - 1);
         int pressed = core.setting_pressed;
         core.setting_pressed = -1;
         LONG row = InterlockedExchange(&want_row, -1);
@@ -937,6 +1352,8 @@ static DWORD WINAPI worker(LPVOID unused) {
         if (save) stats = core;
         ReleaseSRWLockExclusive(&lock);
         if (pressed >= 0) phone_setting_press(pressed);
+        side_hook();
+        if (InterlockedExchange(&want_save_sides, 0)) save_settings();
 
         if (!logged_car && car_samples > 0) {
             logged_car = 1;
@@ -955,7 +1372,9 @@ static DWORD WINAPI worker(LPVOID unused) {
             if (h.panel && !page && !logged_page_wait++) log_line("phone window waits: the HUD page is not on screen");
             /* with a passenger: a speed-limit sign top left instead of the "Max 120" chip */
             int sign = h.sign_limit > 0 && page;
-            phone_window_dash(&h, sign && opt_dash);
+            /* the ride panel by the speedometer during the whole job (before pickup: where to and how far); then nothing at the top */
+            phone_window_dash(&h, job && page && opt_dash);
+            if (job && opt_dash) hud_h.chips = 0;
             if (sign) {
                 if (h.sign_over) snprintf(hud_h.chip2, sizeof(hud_h.chip2), "%s", de ? "Zu schnell!" : "Too fast!");
                 else hud_h.chip2[0] = 0;
@@ -991,11 +1410,9 @@ static void on_setting(void *user, const char *key, int value) {
     if (!strcmp(key, "BusLinesNeedBus")) opt_bus_needs_bus = value != 0;
     else if (!strcmp(key, "CareerExtras")) opt_extras = value != 0;
     else if (!strcmp(key, "Complaints")) opt_complaints = value != 0;
+    else if (!strcmp(key, "PassengerDoors")) opt_doors = value != 0;
     else if (!strcmp(key, "RidePanel")) opt_dash = value != 0;
-    else if (!strcmp(key, "PhoneMouse")) {
-        opt_mouse = value != 0;
-        phone_window_mouse(opt_mouse, phone_clicked, phone_wheel);
-    } else if (!strcmp(key, "Voices")) {
+    else if (!strcmp(key, "Voices")) {
         opt_voices = value < 0 || value > 3 ? 0 : value;
         apply_voices();
     }
@@ -1138,21 +1555,21 @@ static void add_rows(void) {
 
     memset(&s, 0, sizeof(s));
     s.size = sizeof(s);
-    s.key = "PhoneMouse";
-    s.label = TR("row.PhoneMouse.label", "Phone with the mouse");
-    s.description = TR("row.PhoneMouse.description",
-                       "While the phone is open: click a tab to open it, click an entry to pick it, click it again to take it; the wheel scrolls. Clicks on the phone don't reach the game.");
-    s.value = opt_mouse;
-    s.on_change = on_setting;
-    api->add_setting(mod, &s);
-
-    memset(&s, 0, sizeof(s));
-    s.size = sizeof(s);
     s.key = "Complaints";
     s.label = TR("row.Complaints.label", "Passenger complaints");
     s.description = TR("row.Complaints.description",
                        "On: passengers say something about harsh braking, speeding, crashes or being late. Off: they stay quiet about it, but the rating still counts.");
     s.value = opt_complaints;
+    s.on_change = on_setting;
+    api->add_setting(mod, &s);
+
+    memset(&s, 0, sizeof(s));
+    s.size = sizeof(s);
+    s.key = "PassengerDoors";
+    s.label = TR("row.PassengerDoors.label", "Passenger doors");
+    s.description = TR("row.PassengerDoors.description",
+                       "When a passenger gets in or out, a door opens and closes with its sound: rear left, rear right or the front passenger door. Cars without a door animation only play the sound.");
+    s.value = opt_doors;
     s.on_change = on_setting;
     api->add_setting(mod, &s);
 
@@ -1366,6 +1783,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     if (api->azimuth_dir && _snwprintf(folder, MAX_PATH, L"%ls\\%ls", api->azimuth_dir, MOD_FOLDER) > 0) {
         CreateDirectoryW(folder, NULL);
         _snwprintf(ini_path, MAX_PATH, L"%ls\\TransportSim.ini", folder);
+        _snwprintf(sound_folder, MAX_PATH, L"%ls\\sounds", folder);
     }
     if (api->api_version >= 9) {
         const wchar_t *path = api->session_log_path(mod, MOD_FOLDER, 5);
@@ -1375,6 +1793,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
 
     load_settings();
     if (opt_voices > 0) apply_voices();
+    doors_load_sounds();
     save_settings(); /* the INI shows every setting */
     ts_init(&core, (uint32_t)GetTickCount() ^ (uint32_t)GetCurrentProcessId() * 2654435761u, language_german());
     load_stats();
@@ -1391,7 +1810,6 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     HANDLE keys = CreateThread(NULL, 0, keys_thread, NULL, 0, NULL);
     if (keys) CloseHandle(keys);
     phone_window_start(log_line);
-    phone_window_mouse(opt_mouse, phone_clicked, phone_wheel);
     phone_window_dash_place(opt_dash_right, opt_dash_bottom);
     HANDLE thread = CreateThread(NULL, 0, worker, NULL, 0, NULL);
     if (thread) CloseHandle(thread);

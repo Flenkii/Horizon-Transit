@@ -192,19 +192,11 @@ typedef struct {
 
 static const char *pick(int german, const char *de, const char *en) { return german ? de : en; }
 
-static void add_hit(Ctx *c, float ux, float uy, float uw, float uh, int tab, int row, int row2) {
-    TsPhoneCanvas *cv = c->cv;
-    if (!cv->hits || cv->hit_count >= TS_PHONE_HITS) return;
-    TsPhoneHit *h = &cv->hits[cv->hit_count++];
-    h->x = (int)(ux * c->s), h->y = (int)(uy * c->s), h->w = (int)(uw * c->s + 0.5f), h->h = (int)(uh * c->s + 0.5f);
-    h->tab = tab, h->row = row, h->row2 = row2;
-}
 
 void ts_phone_draw(const TsHud *h, int theme, float scale, const char *clock, TsPhoneCanvas *cv) {
     Ctx c = {cv, scale, &themes[theme >= 0 && theme < TS_THEMES ? theme : 0]};
     const Theme *t = c.t;
     float X = PH_M, Y = PH_M;
-    cv->hit_count = 0;
     /* body: shiny rim, the frame, the black bezel, the screen */
     box(&c, X, Y, PH_W, PH_H, PH_R, t->rim, t->frame, 1, 255);
     fill(&c, X + 2.5f, Y + 2.5f, PH_W - 5, PH_H - 5, PH_R - 2.5f, t->frame);
@@ -247,7 +239,6 @@ void ts_phone_draw(const TsHud *h, int theme, float scale, const char *clock, Ts
         int on = i == h->tab;
         if (on) box(&c, tx, y + 2, tw, 28, 14, t->accent, t->accent2, 0, 255);
         text(&c, h->tabs[i], tx, y + 2, tw, 28, tsize, on ? 700 : 600, on ? t->sel_text : t->dim, TS_TEXT_CENTER);
-        if (h->tab_count > 1) add_hit(&c, tx, y, tw, 32, i, -1, -1);
         tx += tw;
     }
     y += 44;
@@ -284,7 +275,6 @@ void ts_phone_draw(const TsHud *h, int theme, float scale, const char *clock, Ts
         }
         int sel = r == h->row_selected || (en->sub_row >= 0 && en->sub_row == h->row_selected);
         float ch = en->sub_row >= 0 ? 56 : 42;
-        add_hit(&c, x0, y, cw, ch, -1, r, en->sub_row);
         if (sel) {
             box(&c, x0, y, cw, ch, 13, t->accent, t->accent2, 0, 255);
         } else {
@@ -457,15 +447,18 @@ void ts_dash_draw(const TsHud *h, float scale, TsPhoneCanvas *cv) {
 
     /* the sign */
     float d = 92, sx = x + 14, sy = y + (DS_H - 18 - d) / 2;
-    if (h->sign_limit > 0) {
+    if (h->sign_limit <= 0) { /* no passenger yet: the job's step and the distance, e.g. "Pick up" / "0.8 mi" */
+        text(&c, h->chip0, sx - 4, sy + 14, d + 8, 20, 13, 700, 0x8A91A3, TS_TEXT_CENTER);
+        text(&c, h->chip1, sx - 4, sy + 36, d + 8, 32, 24, 700, 0xFFFFFF, TS_TEXT_CENTER);
+    } else {
         fill(&c, sx, sy, d, d, d / 2, 0xD71920);
-        fill(&c, sx + 10, sy + 10, d - 20, d - 20, d / 2 - 10, h->sign_over ? 0xFFD21F : 0xFFFFFF);
+        fill(&c, sx + 10, sy + 10, d - 20, d - 20, d / 2 - 10, h->sign_over == 2 ? 0xFF3B3B : h->sign_over ? 0xFFD21F : 0xFFFFFF);
         char n[16];
         snprintf(n, sizeof(n), "%d", h->sign_limit);
         float size = h->sign_limit >= 100 ? 28.0f : 34.0f;
         int has_unit = h->sign_unit[0] != 0;
-        text(&c, n, sx, sy + (has_unit ? 19 : 25), d, 40, size, 700, 0x111111, TS_TEXT_CENTER);
-        if (has_unit) text(&c, h->sign_unit, sx, sy + 57, d, 14, 11, 700, 0x333333, TS_TEXT_CENTER);
+        text(&c, n, sx, sy + (has_unit ? 19 : 25), d, 40, size, 700, h->sign_over == 2 ? 0xFFFFFF : 0x111111, TS_TEXT_CENTER);
+        if (has_unit) text(&c, h->sign_unit, sx, sy + 57, d, 14, 11, 700, h->sign_over == 2 ? 0xFFFFFF : 0x333333, TS_TEXT_CENTER);
     }
 
     /* the G-meter */
