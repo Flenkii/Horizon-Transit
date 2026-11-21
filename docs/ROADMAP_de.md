@@ -92,3 +92,16 @@ Alle 4 Stufen sind eingebaut, ohne die beiden Teile, die nicht gehen (Spiel-Uhrz
 | 5 | Nachfrage | eingebaut nach Ort; Tageszeit und Wetter weggelassen |
 
 Abschaltbar: „Ruf, Sonderfahrten, Wünsche“ im Mod-Menü. 5734 automatische Prüfungen bestanden.
+
+## Stand 0.5.0: auf dem Weg zu 1.0 (gebaut, im Spiel noch ungetestet)
+
+25 Ideen gesammelt (Marvins Wünsche, Spielerwünsche aus dem Internet, eigene), jede gegen die Machbarkeit geprüft. 15 sind eingebaut, 10 gehen nicht oder würden die Mod überladen. Die ganze Liste mit Herkunft und Begründung: [IDEEN-1.0.md](IDEEN-1.0_de.md).
+
+| Bereich | Eingebaut in 0.5.0 |
+|---|---|
+| Geräte | Edge-Handy (Samsung-artig), Tablet mit zweiter Spalte (Fahrgast-Profil, Streckenplan, Fahrtenbuch) |
+| Bus | Linien in beide Richtungen, Haltestellenansagen (auch gesprochen), Haltewunsch mit Durchfahren, Fahrgeld-Kasse am Tacho |
+| Fahrdienst | Push-Anfragen während der Schicht, Stammgäste fragen nach dir, Fundsachen, Taxameter am Tacho |
+| Karriere | Serie (Bonus für gute Aufträge hintereinander), Tagesziel pro Schicht |
+
+**Für 1.0 noch offen:** alles von 0.4 und 0.5 im Spiel testen und die Zahlen danach einstellen (wie oft Push-Anfragen kommen, Fundsachen, Bonushöhen). Ob der Bus Tür-Animationen hat, lässt sich nur im Spiel prüfen.

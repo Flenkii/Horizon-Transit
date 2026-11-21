@@ -14,6 +14,12 @@ float clampf(float v, float lo, float hi);
 void event(TsCore *c, int kind, int icon, int sound, const char *title, const char *text);
 void toast(TsCore *c, int icon, int sound, const char *title, const char *text);
 void sound(TsCore *c, int which);
+void row_meter(TsHud *h, float full, int quality); /* 0.5.1: a meter under the last row (quality: green/yellow/red) */
+/* talk.c (0.5.1) */
+int talk_maybe_ask(TsCore *c);
+void talk_step(TsCore *c);
+void talk_ride_start(TsCore *c);
+void talk_chip(const TsCore *c, char *out, size_t size);
 void chat(TsCore *c, int style, const char *text, int force);
 void say(TsCore *c, int style, int kind, int force);
 void complain(TsCore *c, int kind); /* a remark on the driving, or only a thought, or nothing: as the person is */
@@ -34,6 +40,7 @@ float career_pay_factor(const TsCore *c);
 /* after a finished job: returns the reputation's change. bus_line -1 for a ride */
 float career_job_done(TsCore *c, int stars, int pay, int base, int special, float trip_m, int bus_line);
 void career_cancel(TsCore *c, int passenger_on_board);
+void career_auto_shift(TsCore *c);
 void career_account_rows(const TsCore *c, TsHud *h); /* the phone's Account tab */
 
 /* wishes.c: what a passenger asks for on the way */
@@ -52,5 +59,51 @@ void tt_start(TsCore *c);
 float tt_arrived(TsCore *c);          /* at stop c->stop_i: returns the delay in seconds (0 at the first stop) */
 void tt_chip(const TsCore *c, char *out, size_t size);
 float tt_line_minutes(const TsCore *c, int line);
+
+/* jobs.c, 0.5 */
+int bus_direction(const TsCore *c, int line); /* 1: the line will run backwards */
+
+/* career.c, 0.5: the day's goal */
+void career_goal_check(TsCore *c);
+
+/* service.c (0.5): push requests on shift, lost items, the streak, the logbook, the taxi meter and the tablet's column */
+void service_idle_step(TsCore *c);
+void service_job_starts(TsCore *c);
+int service_streak(TsCore *c, int stars, int pay); /* after a job: the streak's bonus (paid already), 0 = none */
+void service_streak_feed(TsCore *c, int bonus);
+void service_log(TsCore *c, int bus, int who, int place, int pay, int stars);
+void service_maybe_lost(TsCore *c, int person, int place);
+void service_hud(const TsCore *c, TsHud *h);
+
+/* jobs.c, 0.6: a line of a kind with its tokens filled in, without saying it */
+void line_text(TsCore *c, int kind, char *out, size_t size);
+int uber_pay(float trip_m, float sat, int type, float factor); /* a ride's pay (0.6: for the tests) */
+
+/* market.c (0.6): ride classes, hotspots, tiers */
+float market_class_pay(int ride_class);
+float market_class_soft(int ride_class);
+float market_class_time(int ride_class);
+int market_pick_class(TsCore *c, int type);
+float market_tier_progress(const TsCore *c);
+void market_tier_hint(const TsCore *c, char *out, size_t size);
+const char *market_tier_perks(const TsCore *c, int tier);
+float market_tier_pay(const TsCore *c);
+void market_check_tier(TsCore *c);
+float market_surge(const TsCore *c, int place);
+int market_hot_near(const TsCore *c);
+int market_hot_pickup(TsCore *c); /* a pickup in a hotspot near the car (70 %), -1 = none */
+void market_step(TsCore *c);
+void market_surge_text(const TsCore *c, float surge, char *out, size_t size);
+
+/* mapview.c (0.7): the map tab, the preview, the job's map */
+void map_hud(const TsCore *c, TsHud *h);
+
+/* cards.c (0.6): the cards in the ride panel's place */
+void card_step(TsCore *c);
+void card_hud(const TsCore *c, TsHud *h);
+void card_ride(TsCore *c, int stars, int pay, int base, int bonus, int late);
+void card_bus(TsCore *c, int stars, int pay, int base, int bonus);
+void card_shift(TsCore *c);
+void card_tier(TsCore *c, int tier);
 
 #endif

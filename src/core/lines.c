@@ -1087,25 +1087,122 @@ static const TsLineText tourist_talk[] = {
     {"Gibt es hier irgendwo einen Aussichtspunkt?", "Is there a lookout point somewhere around here?"},
     {"Ich glaube, ich will hier nie wieder weg.", "I think I never want to leave."},
 };
-static const TsLineText wish_slower[] = {
-    {"Kannst du kurz unter {limit} km/h bleiben? Ich muss telefonieren.", "Can you stay under {limit} km/h for a bit? I need to make a call."},
-    {"Mir ist etwas flau. Bitte eine Weile nicht schneller als {limit}.", "I feel a bit queasy. Please no faster than {limit} for a while."},
-    {"Ich will die Aussicht genießen. Unter {limit}, ja?", "I want to enjoy the view. Under {limit}, okay?"},
-    {"Bitte etwas langsamer, höchstens {limit}. Ich schreib eine Nachricht.", "A bit slower please, {limit} at most. I'm writing a message."},
-    {"Könntest du kurz langsamer fahren? Unter {limit} km/h, bitte.", "Could you slow down for a bit? Under {limit} km/h, please."},
-    {"Mir ist ein bisschen flau. Bitte unter {limit} km/h.", "I feel a bit queasy. Under {limit} km/h, please."},
-    {"Ich mach ein Video von der Landschaft. Unter {limit} km/h, bitte.", "I'm filming the scenery. Under {limit} km/h, please."},
-    {"Bitte mal etwas gemütlicher, unter {limit} km/h.", "A bit more leisurely, please, under {limit} km/h."},
+static const TsLineText wish_slower[] = { /* 0.5.1: for the rest of the ride, not for a few seconds */
+    {"Kannst du bis zum Ziel unter {limit} km/h bleiben? Ich muss telefonieren.", "Can you stay under {limit} km/h until we're there? I need to make a call."},
+    {"Mir ist etwas flau. Bitte ab jetzt nicht schneller als {limit}.", "I feel a bit queasy. Please no faster than {limit} from now on."},
+    {"Ich will die Aussicht genießen. Den Rest der Fahrt unter {limit}, ja?", "I want to enjoy the view. Under {limit} for the rest of the ride, okay?"},
+    {"Bitte ab hier etwas langsamer, höchstens {limit}. Ich schreib noch eine Mail.", "A bit slower from here please, {limit} at most. I'm writing an email."},
+    {"Könntest du ab jetzt langsamer fahren? Unter {limit} km/h, bitte.", "Could you drive slower from now on? Under {limit} km/h, please."},
+    {"Mir ist ein bisschen flau. Bis wir da sind, bitte unter {limit} km/h.", "I feel a bit queasy. Under {limit} km/h until we're there, please."},
+    {"Ich mach ein Video von der Landschaft. Bis zum Ziel unter {limit} km/h, bitte.", "I'm filming the scenery. Under {limit} km/h until we arrive, please."},
+    {"Ich hab's nicht eilig. Ab jetzt gemütlich, unter {limit} km/h.", "I'm in no rush. Take it easy from here, under {limit} km/h."},
 };
 static const TsLineText wish_smooth[] = {
-    {"Ich trink gerade Kaffee. Bitte ganz sanft fahren!", "I'm drinking coffee. Very smooth driving, please!"},
-    {"Ich mach mich kurz frisch. Bitte keine Ruckler jetzt.", "I'm doing my make-up. No jolts right now, please."},
-    {"Ich hab einen Kuchen auf dem Schoß. Ganz vorsichtig!", "I've got a cake on my lap. Very carefully!"},
-    {"Kurze Videokonferenz. Kannst du bitte ganz ruhig fahren?", "Quick video call. Can you drive really smoothly?"},
-    {"Ich muss kurz was schreiben. Bitte ganz sanft fahren.", "I need to write something. Very smooth driving, please."},
-    {"Ich trinke gerade Tee. Bitte keine Ruckler.", "I'm drinking tea. No jolts, please."},
-    {"Ich mach kurz die Augen zu. Ganz ruhig fahren, bitte.", "I'll close my eyes for a bit. Very calm driving, please."},
-    {"Ich hab Eier dabei. Ganz vorsichtig, ja?", "I've got eggs with me. Very carefully, okay?"},
+    {"Ich trink gerade Kaffee. Bitte bis zum Ziel ganz sanft fahren!", "I'm drinking coffee. Very smooth driving until we're there, please!"},
+    {"Ich mach mich noch frisch. Bitte ab jetzt keine Ruckler.", "I'm doing my make-up. No jolts from now on, please."},
+    {"Ich hab einen Kuchen auf dem Schoß. Den Rest der Fahrt ganz vorsichtig!", "I've got a cake on my lap. Very carefully for the rest of the ride!"},
+    {"Videokonferenz bis wir da sind. Kannst du bitte ganz ruhig fahren?", "Video call until we arrive. Can you drive really smoothly?"},
+    {"Ich muss noch was schreiben. Bitte ab jetzt ganz sanft fahren.", "I need to write something. Very smooth driving from now on, please."},
+    {"Ich trinke gerade Tee. Bitte keine Ruckler mehr.", "I'm drinking tea. No more jolts, please."},
+    {"Ich mach die Augen zu, bis wir da sind. Ganz ruhig fahren, bitte.", "I'll close my eyes until we're there. Very calm driving, please."},
+    {"Ich hab Eier dabei. Ab jetzt ganz vorsichtig, ja?", "I've got eggs with me. Carefully from now on, okay?"},
+};
+/* 0.5.1: in a supercar or hypercar: "floor it", no limit for the rest of the ride */
+static const TsLineText wish_floorit[] = {
+    {"Moment, das ist ein {car}? Vergiss das Tempolimit, gib Vollgas!", "Wait, this is a {car}? Forget the limit, floor it!"},
+    {"In so einem Auto zu schleichen ist eine Sünde. Zeig mal, was er kann!", "Crawling in a car like this is a crime. Show me what it can do!"},
+    {"Ich sitz zum ersten Mal in einem {car}. Bitte einmal richtig Gas geben!", "First time in a {car}. Please give it some proper throttle!"},
+    {"Ab jetzt ist mir das Tempo egal. Lass ihn laufen!", "I don't care about the speed from now on. Let it run!"},
+    {"Komm schon, einmal {limit} km/h in dem Ding. Ich will's spüren!", "Come on, {limit} km/h in this thing once. I want to feel it!"},
+    {"Das Ding hat doch nicht umsonst so viel PS. Gib Gas!", "It doesn't have all that power for nothing. Step on it!"},
+};
+/* 0.6: the comment on the card after a ride, by the stars (short: one line on the card) */
+static const TsLineText rate_great[] = {
+    {"Beste Fahrt seit Langem. Danke!", "Best ride in ages. Thanks!"},
+    {"Butterweich gefahren. Gerne wieder!", "Smooth as butter. Any time again!"},
+    {"Fünf Sterne, ganz klar.", "Five stars, easily."},
+    {"Pünktlich, ruhig, nett. Perfekt.", "On time, calm, friendly. Perfect."},
+    {"So muss Fahrdienst sein.", "That's how a ride should be."},
+    {"Ich buch nur noch dich!", "I'm only booking you from now on!"},
+    {"Hab fast vergessen, dass wir fahren.", "I almost forgot we were moving."},
+    {"Tolles Auto, toller Fahrer.", "Great car, great driver."},
+    {"Entspannter als im Wohnzimmer.", "More relaxing than my living room."},
+    {"Danke, du hast meinen Tag gerettet.", "Thanks, you saved my day."},
+    {"Top! Trinkgeld hast du dir verdient.", "Top! You earned that tip."},
+    {"Wie auf Schienen. Respekt.", "Like on rails. Respect."},
+};
+static const TsLineText rate_good[] = {
+    {"Gute Fahrt, gerne wieder.", "Good ride, would ride again."},
+    {"Alles bestens, danke!", "All good, thanks!"},
+    {"Angenehm gefahren.", "A pleasant ride."},
+    {"Hat gepasst. Danke dir.", "That worked well. Thank you."},
+    {"Solide Fahrt, nettes Auto.", "Solid ride, nice car."},
+    {"Kam gut an, danke.", "Got here fine, thanks."},
+    {"Fast perfekt. Weiter so!", "Nearly perfect. Keep it up!"},
+    {"Gerne wieder mit dir.", "Happy to ride with you again."},
+    {"War entspannt. Danke!", "That was relaxed. Thanks!"},
+    {"Vier Sterne von mir.", "Four stars from me."},
+};
+static const TsLineText rate_ok[] = {
+    {"Ging so. Etwas ruppig.", "It was okay. A bit rough."},
+    {"Angekommen bin ich ja.", "Well, I got here."},
+    {"Ein bisschen sanfter wär schön.", "A little smoother would be nice."},
+    {"Okay, aber nicht super.", "Okay, but not great."},
+    {"Mein Kaffee ist jetzt überall.", "My coffee is everywhere now."},
+    {"Das geht noch besser.", "You can do better than that."},
+    {"Hm. Drei Sterne.", "Hm. Three stars."},
+    {"Hätte entspannter sein können.", "Could have been more relaxed."},
+    {"Nicht schlecht, nicht toll.", "Not bad, not great."},
+    {"Bremsen üben wir noch, ja?", "We'll practise the braking, yes?"},
+};
+static const TsLineText rate_bad[] = {
+    {"Nie wieder. Mir ist schlecht.", "Never again. I feel sick."},
+    {"Das war eine Achterbahn.", "That was a rollercoaster."},
+    {"Ich steig lieber auf den Bus um.", "I'm switching to the bus."},
+    {"Hast du den Führerschein im Lotto gewonnen?", "Did you win your licence in a raffle?"},
+    {"Meine Knie zittern noch.", "My knees are still shaking."},
+    {"Ein Stern, und der ist geschenkt.", "One star, and that's a gift."},
+    {"Ich melde das der Firma.", "I'm reporting this to the company."},
+    {"Zu spät und zu wild.", "Too late and too wild."},
+    {"Bitte nimm mich nie wieder mit.", "Please never pick me up again."},
+    {"Ich brauch erstmal frische Luft.", "I need some fresh air first."},
+};
+
+static const TsLineText pool_hello[] = {
+    {"Hallo zusammen! Danke fürs Mitnehmen.", "Hi, everyone! Thanks for picking me up."},
+    {"Hi! Ich setz mich einfach dazu, okay?", "Hi! I'll just squeeze in, okay?"},
+    {"Guten Tag. Sammelfahrt, oder? Perfekt.", "Hello. Shared ride, right? Perfect."},
+    {"Oh, schon jemand drin. Hallo!", "Oh, someone's already in. Hello!"},
+    {"Na, auch auf dem Weg zum Festival-Trubel?", "So, also heading into the festival madness?"},
+    {"Hallo! Ich bin nicht lange dabei, versprochen.", "Hi! I won't be long, promise."},
+    {"Servus! Ist hier noch Platz für meine Tasche?", "Hey! Is there room for my bag?"},
+    {"Hallo! Teilen spart, sag ich immer.", "Hi! Sharing saves money, I always say."},
+};
+static const TsLineText pool_reply[] = {
+    {"Hallo! Kein Problem, ist ja Platz genug.", "Hi! No problem, there's plenty of room."},
+    {"Hi! Ich steig auch bald aus.", "Hi! I'm getting out soon anyway."},
+    {"Hallo. Mach's dir bequem.", "Hello. Make yourself comfortable."},
+    {"Hey! Wo musst du denn hin?", "Hey! Where are you headed?"},
+    {"Hallo! Netter Fahrer, kann ich sagen.", "Hi! Nice driver, I can tell you."},
+    {"Hi! Die Aussicht hier ist super, oder?", "Hi! Great view around here, isn't it?"},
+    {"Hallo zurück! Gute Gesellschaft ist immer gut.", "Hello back! Good company never hurts."},
+    {"Ah, Verstärkung. Hallo!", "Ah, reinforcements. Hello!"},
+};
+
+static const TsLineText floorit_done[] = {
+    {"WAHNSINN! Mein Magen ist noch hinten!", "INSANE! My stomach is still back there!"},
+    {"Wow, wow, wow! Das erzähl ich allen!", "Wow, wow, wow! I'm telling everyone about this!"},
+    {"Okay, das war der beste Moment meiner Woche.", "Okay, that was the best moment of my week."},
+    {"Hast du das gespürt? Unglaublich!", "Did you feel that? Unbelievable!"},
+    {"Ich zittere. Im guten Sinne!", "I'm shaking. In a good way!"},
+    {"Ha! Das war es wert!", "Ha! That was worth it!"},
+};
+static const TsLineText wish_slip[] = {
+    {"Hey, vorsichtig! Ich hatte doch gebeten ...", "Hey, careful! I did ask ..."},
+    {"Uff. Bitte etwas ruhiger, ja?", "Oof. A bit calmer, please?"},
+    {"Hoppla! Noch mal so und es geht daneben.", "Whoa! Once more and it'll spill."},
+    {"Na, das war jetzt nicht so sanft.", "Well, that wasn't exactly smooth."},
+    {"Bitte langsamer, wie besprochen.", "Slower, please, like we said."},
 };
 static const TsLineText wish_faster[] = {
     {"Gib mal Gas! Über {limit} wär toll!", "Step on it! Over {limit} would be great!"},
@@ -1411,5 +1508,14 @@ const TsLineSet ts_line_sets[L_KINDS] = {
     [L_TOWN_TALK] = SET(town_talk),
     [L_FESTIVAL_TALK] = SET(festival_talk),
     [L_COUNTRY_TALK] = SET(country_talk),
+    [L_WISH_FLOORIT] = SET(wish_floorit),
+    [L_FLOORIT_DONE] = SET(floorit_done),
+    [L_WISH_SLIP] = SET(wish_slip),
     [L_THOUGHT] = SET(thoughts),
+    [L_RATE_GREAT] = SET(rate_great),
+    [L_RATE_GOOD] = SET(rate_good),
+    [L_RATE_OK] = SET(rate_ok),
+    [L_RATE_BAD] = SET(rate_bad),
+    [L_POOL_HELLO] = SET(pool_hello),
+    [L_POOL_REPLY] = SET(pool_reply),
 };

@@ -12,7 +12,10 @@
 #define TT_ON_TIME 60.0f
 
 static float leg_seconds(const TsCore *c, const TsLine *line, unsigned i) {
-    float m = place_distance(line->stops[i - 1], line->stops[i]) * TS_ROAD_FACTOR;
+    /* 0.5: the line may run backwards (only the running line; the legs are the same length both ways) */
+    int a = line->stops[i - 1], b = line->stops[i];
+    if (c->mode == TS_BUS && line == &ts_lines[c->line]) a = ts_bus_stop(c, c->line, (int)i - 1), b = ts_bus_stop(c, c->line, (int)i);
+    float m = place_distance(a, b) * TS_ROAD_FACTOR;
     return m / TS_BUS_AVG_SPEED * c->time_factor + TT_DWELL;
 }
 

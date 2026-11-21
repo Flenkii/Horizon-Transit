@@ -2,6 +2,116 @@
 
 What changed for players, newest first. Every version is on the [Releases](../../releases) page.
 
+## 0.9.1
+
+A navigation view on the phone's map, and smooth animations everywhere.
+
+- **Navi zoom:** a new zoom level "Navi" (map tab: Near, Region, Whole map, Navi; during a job: Route, Whole map, Navi). The map turns with the car like the game's navigation in the bottom left: the way you drive always points up, you sit in the lower part, the road ahead is in view. The blue dot becomes a navigation arrow, and a compass in the top right shows north.
+- **Smooth zoom changes:** switching zoom glides to the new view in 0.6 seconds (area, size and rotation). One spot of the map stays in place, so nothing swings away. The dot morphs into the arrow, and the compass fades in and out. A jump of the job map's area (the next target) glides too.
+- **Calm navi rotation:** the map follows your heading smoothly, without jitter from small steering moves.
+- **Nothing pops up any more:** when the phone shows something else (a tab, the selection, rows, pins), the old picture crossfades into the new one in 0.22 seconds, while the map keeps gliding underneath. The tab highlight slides to the new tab (the tab bar itself doesn't fade, so there is only one highlight).
+- **Closing the phone:** it fades out to the left (before, it vanished at once). Opening still slides it in.
+- **Ride panel and passenger lines:** a new target, wish or speed limit crossfades. New passenger lines fade in, the last one fades out.
+- **Gradients:** the beam at your dot fades out softly, the map has a gentle shade at the top and bottom, and the compass has a gradient.
+- New tests: gliding, turning, crossfades, the tab highlight. `tools/anim_gifs.py` makes GIFs of every animation from the test frames.
+
+## 0.9.0
+
+The phone's map now comes from the game itself. Every player has it, with nothing but the DLL.
+
+- **Map from your game files:** at start the mod reads the pause menu's map picture (`media\ui\textures\data_bound\Anthem_Map.zip`) from your own game folder and restyles it as a dark phone map (land, forest, fields, towns, water). Nothing of the game is in the mod. `Karte.bmp` is no longer needed (it is only a fallback if the game files can't be read).
+- **The game's road network:** roads come from the game's own network (`media\tracks\anthem\ribbon_00\anthem_00.nav`): streets, dirt roads, trails and motorways (amber). Zoomed in they are drawn sharp, and the ways on the phone follow them.
+- **Placed to the metre:** the map sits where the game's pause menu puts it (`MapProfilePauseMenu.xml`); the game's roads lie exactly on the roads in the picture, so your dot is where you are.
+- The map is built on its own thread in the first 1 to 2 seconds; until then the phone shows the places on a dark background. The log says what was read (`map: from the game's files: ...`).
+- New tests: unzipping (deflate), BC7, the Xbox One tile order, the road network, motorways, ways along the roads.
+
+## 0.8.1
+
+Fixes from the first test in the game.
+
+- **Answering works with a controller:** LB + RB + D-pad down (change it under Pause › MODS, or `[Keys] ReplyPad`); B on the keyboard as before. Passengers now always ask their questions. Before, they only asked after you had driven with the keyboard, so controller players never got one. The prompt shows the right button, and you have 12 seconds instead of 9.
+- **Push requests without "Start shift":** the shift now starts by itself with your first ride or line, like going online in a ride app. After that, requests pop up while you drive around without a job.
+- **Fresh requests on the phone:** during a shift the phone often kept the old list of requests, even after a cancelled ride. Now only a push request's list stays for a minute.
+- **Regulars and lost items more often:** regulars ask for you in 25 % of lists (was 18 %), lost items after 15 % of rides (was 7 %).
+
+## 0.8.0
+
+More realistic stops and destinations.
+
+- **Real bus stops:** the 14 bus stop signs the map makers put into the game (`extras/Anthem.track`) are now stops: 8 in Nice (signs on both sides of a street count as one), 2 in Saint Martin, 1 in Montellino. The **Nice city bus** now runs through five of them.
+- **Real car parks:** 49 of the game's parking spots (`trackroutes/ParkingAreas.nt`) in Nice, Sisteron, San Giovanni, Castelletto and along the coast are pickups and destinations.
+- **Race starts only in the countryside:** in towns with enough real places they are gone, and so is every one near a motorway sign or motorway bridge. Rides pick real places 90 % of the time, shared rides too.
+- **Car meet:** nothing within 500 m of the car meet (on the coast south of the festival) any more.
+- **Festival stop on the road:** it is no longer the garage zone in the middle of the grounds but the road through the festival.
+- A few more people get on and off at real bus stops than at a spot in the countryside.
+- 139 places instead of 208, all from the game's files. `tools/gen_stops.py` now takes the game's `media/tracks/anthem` folder.
+
+## 0.7.1
+
+- Map: re-measured the alignment (against every race start). Your own position and the Horizon Festival now sit where the game shows them (they were off by a few hundred metres).
+- Map: roads under the icons and place names, and the festival grounds, are filled in from a second map picture instead of being smudged out.
+- Map: the car's arrow follows the direction of travel while driving; standing still, the mod learns which way the game's forward vector points.
+- Karte.bmp has to be copied again (new alignment).
+
+## 0.7.0
+
+A map of the festival region on the phone, in a dark maps-app style.
+
+- **New "Map" tab:** you as a blue dot with your heading, the towns, the festival and the hotspots (orange circles with their surcharge). Enter zooms: near (about 3 km), region (about 9 km), the whole map. A scale bar bottom right.
+- **Preview before accepting:** Enter on a ride first shows it on the map: you, the pickup (green dot), the destination (red pin) and their names. Blue is the way to the pickup, grey the ride after it; shared rides also show the second rider and both destinations. Below: "Accept ride" (with the fare) and "Back" (↑↓ to choose, Enter). ←/→ switch between the route and the whole map, Backspace goes back to the list.
+- **Bus lines on the map:** Enter on a line shows all its stops, numbered in driving order, and the line's way, with "Start line" and "Back".
+- **Map during a job:** ←/→ switch the phone between "Job" and "Map". The map shows the way to the next target in blue and the rest in grey (bus: done stops grey, the next one blue). Enter zooms there; cancelling only works on the Job tab.
+- **Ways along the roads:** the lines follow the map's roads (shortest way on the road lines of the picture), bridging small gaps; the game's GPS still guides the actual driving.
+- **The map picture is not part of the mod.** The mod reads `Karte.bmp` (8-bit BMP) from its folder (`Azimuth\TransportSim\`). Make it from a picture of the game's map you are allowed to use with `tools/make_map.py` (and `tools/clean_xboxdome.py` for one particular picture). Without it the map shows the places and routes on a plain dark background.
+- New mod-menu setting **"Map preview before accepting"** (on by default). Off: Enter accepts at once, as before.
+- Tabs use a slightly smaller font so six fit. Backspace now closes the preview (or the job's map) before the phone.
+- 9813 automated checks pass, with new ones for reading the map, the ways, the Map tab, the preview and the job's map.
+
+## 0.6.0
+
+Seven new things to make Horizon Transit feel like a real ride app. Tested automatically only, not in the game yet.
+
+- **Card after the ride:** at the destination the ride card by the speedometer shows the result for 8 seconds: the stars light up one by one, the money counts up, a short comment from the passenger (42 comments by stars) and the fare, tip, streak bonus and whether you were on time. After a bus line too. The payout pop-up then goes away (the till sound stays). With the ride panel off, everything stays as before.
+- **Shift review:** ending a shift shows a card for 14 seconds: earnings, rides and lines, average stars, distance, tips, the best job, the reputation change, the day's goal and your driver tier as a medal.
+- **Animations:** the ride card slides up and fades in and out, the route fills smoothly, on the cards the money counts up and the stars pop one after another. The phone slides in from the left when it opens.
+- **Ride classes by car:** small cars and hot hatches get *Saver* rides (x0.85, easy-going passengers, a bit more time), off-roaders *XL* rides with 2 to 4 people (x1.3), luxury saloons and supercars from the Silver tier *Black* rides (x1.4, very strict about rough driving). Ordinary *Comfort* rides keep coming too. The class shows on the phone and as a badge on the ride card.
+- **Hotspots:** one or two places (the festival or towns with enough spots) are busy for 4 to 7 minutes: requests within 1.5 km pay 1.2x to 1.5x. Near one, the first request usually comes from there. The phone shows the nearest hotspot at the top of the ride list, the ride card the surcharge by the meter. On shift a pop-up names new hotspots nearby. Class and surcharge together at most x2.
+- **Driver tiers:** Bronze, Silver (10 jobs, 4.0 average, reputation 55), Gold (30, 4.3, 68), Platinum (75, 4.6, 82). Silver unlocks Black rides, Gold gives +5 % pay and more VIP guests, Platinum +10 % pay and +0.1x in hotspots. A tier is never lost (saved as `[Career] Tier`). A new tier gets its own card with a medal. The account shows the tier with a bar to the next (instead of the tips row; tips moved to the account's footer).
+- **Shared rides:** now and then the medium request is a shared ride with two passengers: you pick up the first, the second joins on the way (they say hello), the first gets out at their destination and pays, then you drive the second on. Each pays 20 % less than alone, together it pays off. Wishes only start once the first is out. At the end the card shows both names and the total.
+- Saver/XL/Black, hotspots, tier perks and shared rides are off when "Reputation, special rides, wishes" is off.
+- 9504 automatic checks pass (with pictures), including new ones for cards, classes, hotspots, tiers and shared rides.
+
+## 0.5.1
+
+More sound, more realistic wishes, and you can talk back.
+
+- **Speed warning tones:** when the speed sign turns yellow, one soft "bong" plays once (again only after you were back under the limit for 1.5 s). While the sign is red, a "ding-ding" chime repeats every second; back to yellow, it stops. Switch: "Speed warning tones" in the mod menu.
+- **New sounds**, all synthesised by the mod's own script (`tools/gen_sounds.py`, no recordings, nobody to credit) and built into the DLL: a gong before every bus announcement, the stop bell a few seconds after it, a ping for push requests, a cash chime on every payout.
+- Sounds now play through waveOut, several at once. New mod-menu setting **"Mod sounds"**: Off / Quiet / Normal (default) / Loud; Off brings back the game's menu sounds. WAVs with the same name in `TransportSim\sounds\` replace the built-in ones.
+- **Wishes last until the destination** instead of a few seconds: "under 70" sets the speed sign to 70 for the rest of the ride. A little over is fine; clearly over (10 km/h for 2 s) gets a reminder, the second time the wish fails. "Smooth" forgives one jolt with a remark. The chip reads "Till end: under 70" instead of a timer.
+- **"Floor it" in a supercar:** in modern supercars and hypercars some passengers (car fans and day-trippers most of all) want you to step on it: no speed limit for the rest of the ride, the sign turns into the end-of-restrictions sign, and hitting 180 km/h (110 mph) fulfils the wish.
+- **Talk back:** now and then a passenger asks you something and the ride panel shows "[B] Reply (9)". Press B and your driver answers (in the feed, and with Voices on out loud in his own fixed, low male voice that no passenger has); the passenger is pleased (+3 % satisfaction) and reacts. Staying quiet is fine too. At most two questions a ride. Keyboard only: questions only come while you drive with W/A/S/D or the arrow keys, so controller and wheel players never see a prompt. Other key: `[Keys] ReplyKey` in `TransportSim.ini`.
+- **Nicer app:** thin meters under the entries: progress to the pickup and the destination, the line's progress, satisfaction and reputation in green, yellow or red.
+- **New design "Pure"** in the style of ride-hailing apps: white, black type, grey cards without outlines, black selection. Phone > Options > Design or the mod menu. On the tablet the destination is now a square instead of a dot, as in ride apps (all designs).
+- **New ride card by the speedometer:** the panel at the bottom right is now a card like a ride app's: the time left in big digits, where to (town big, spot small), a route from a dot to a square that fills as you drive (bus: the line's stops), the passenger's mood, the speed sign and a small G-meter on the right, the wish and the meter along the bottom.
+- **Ride panel and passenger lines in the phone's design, as frosted glass:** both follow the chosen design (Pure too). The glass is milky and barely see-through, with a fine grain and a soft texture, a light rim and a soft sheen. Light designs get light glass with dark text. (An overlay window can't reliably blur the game behind it, so the blur is imitated.)
+- 9063 automated checks. **Not tested in game yet.**
+
+## 0.5.0
+The first step towards 1.0: 15 ideas from the author's wishes, from players' wishes for taxi and bus games found online, and from real ride and bus apps. The whole list, where each idea came from and what couldn't be done: [docs/IDEEN-1.0_de.md](docs/IDEEN-1.0_de.md) (German).
+- **Two new devices**: besides the phone there's the **Edge** (slim bezels, punch-hole camera, clock on the left, Android's three keys) and the **tablet** (landscape, the list on the left, details on the right). Switch in phone > Options > Device or in the mod menu. All 7 designs fit every device.
+- **The tablet's column**: before you accept, the passenger's profile (age, job, rides together, favourite cars), pickup, destination, time limit and pay. On the Bus tab the line's stops as a route map; during a line, the stops done in grey and the next one marked. On Account the logbook with your last 5 jobs.
+- **Bus lines both ways**: a line starts at the end that's nearer. Ring lines go the other way round every second time.
+- **Stop announcements**: "Next stop: …", at the last one "Last stop, all change please." Read out with Voices on. The "Next stop" pop-up is gone instead.
+- **Stop requests**: if nobody wants to get off or on, the announcement says "No stop requested" and you may drive through. If someone wants off, you hear the stop button.
+- **Requests pop up on shift**: driving around without a job, a request comes as a pop-up every 2 to 3 minutes; the phone then shows it first. No shift, no pop-ups.
+- **Regulars ask for you**: "Lena · asked for you", 15 % more pay.
+- **Lost items**: now and then a passenger calls after getting out because something's still in your car. Bring it back: 60 € and +1 reputation.
+- **Streak**: from the third 4- or 5-star job in a row, 5 % bonus per job, up to 20 %.
+- **Day's goal**: 5 jobs with 4 stars on average in one shift pays 250 €.
+- **Taxi meter by the speedometer**: the ride panel shows the fare running. On the bus it shows the fares taken.
+- "Bus lines need the bus" left the phone's Options (room for "Device"); it's still in the mod menu.
+
 ## 0.4.3
 - **Passenger doors (on by default)**: when a passenger gets in or out, a door opens and closes again with its sound: rear left, rear right or the front passenger door, at random. At the destination the same door opens again. The door really opens (the car's own showroom animation, also seen from outside). Cars without a door animation only play the sound. Getting in now takes 3.5 s (before 3 s), getting out 3.5 s (before 2 s). Switch: "Passenger doors" in the mod menu.
 - **Right-hand drive**: drive a car for about a second in the driver or cockpit view and the mod remembers which side its wheel is on; in a right-hand-drive car the front passenger door is on the left. Until then the wheel counts as left. You can also list cars in `TransportSim.ini` under `[Doors] RightHandDrive=`.

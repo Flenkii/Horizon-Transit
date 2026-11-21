@@ -2,14 +2,20 @@
    Only what the mod can see: the speed, the driving (jolts), a stop at a place. (Music and windows are not
    something the mod can check, so there are no wishes about them.)
 
-   - slower:  stay under a speed for 30 s (5 s to get there)
-   - smooth:  no harsh moment for 25 s (2 s grace)
-   - faster:  reach a speed within 25 s (fans, the hurried, trips)
+   0.5.1: a wish lasts until the destination, as a real passenger means it (no timers any more):
+   - slower:  under a speed for the rest of the ride; the speed sign shows it. Failed after 2 s clearly over it
+              (10 km/h; 8 s to slow down first)
+   - smooth:  no jolts for the rest of the ride; the first slip gets a remark, the second fails it
+   - faster:  reach a speed before the destination (fans, the hurried, trips)
+   - floor it: in a supercar or hypercar: no speed limit for the rest of the ride (the end-of-restrictions sign);
+              done when you reach the speed they want to feel (180 km/h, 110 mph)
    - stop:    stop at a place near the way for 4 s; the GPS goes there and then on to the destination
    Done: satisfaction +6 and thanks; not done: -5. One wish per ride, two for VIPs and weddings. */
 #include "jobs_internal.h"
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
+#include "cars.h"
 
 #define WISH_REWARD 6.0f
 #define WISH_PENALTY 5.0f
@@ -19,13 +25,16 @@ void wish_ride_start(TsCore *c) {
     c->wish_count = 0;
     c->wish_stop_stage = 0;
     c->next_wish_t = c->t + 35.0 + 40.0 * random_unit(c);
+    c->floorit = 0;
+    c->wish_slips = 0;
+    c->wish_over_since = 0.0;
 }
 
 static void wish_end(TsCore *c, int done) {
     if (done) {
         c->sat = clampf(c->sat + WISH_REWARD, 0.0f, 100.0f);
         c->wishes_ok++;
-        say(c, 1, c->wish == TS_WISH_STOP ? L_STOP_DONE : L_WISH_THANKS, 1);
+        say(c, 1, c->wish == TS_WISH_STOP ? L_STOP_DONE : c->wish == TS_WISH_FLOORIT ? L_FLOORIT_DONE : L_WISH_THANKS, 1);
     } else {
         c->sat = clampf(c->sat - WISH_PENALTY, 0.0f, 100.0f);
         c->wishes_failed++;
@@ -53,13 +62,25 @@ static int stop_place(TsCore *c) {
     return n ? pick[random_below(c, n)] : -1;
 }
 
+/* 0.5.1: a modern supercar or hypercar (the Autoshow's "super" group without the old racers and the Gurkha) */
+static int supercar(const TsCore *c) {
+    if (c->car_group != TS_GROUP_SUPER || c->car_index < 0 || c->car_index >= (int)ts_car_count) return 0;
+    const TsCarInfo *car = &ts_cars[c->car_index];
+    return car->year >= 1985 && strcmp(car->make, "Terradyne") != 0;
+}
+
 static void wish_begin(TsCore *c) {
     int type = c->job.ptype, max = c->job.max_kmh > 0 ? c->job.max_kmh : 120;
-    int options[4], n = 0;
+    int options[8], n = 0;
     options[n++] = TS_WISH_SMOOTH;
-    if (max >= 100 && c->speed > 16.0f) options[n++] = TS_WISH_SLOWER;
-    if (type == TS_P_FAN || type == TS_P_HURRY || type == TS_P_TOURIST) options[n++] = TS_WISH_FASTER;
+    if (max >= 100 && c->speed > 16.0f && !c->floorit) options[n++] = TS_WISH_SLOWER;
+    if ((type == TS_P_FAN || type == TS_P_HURRY || type == TS_P_TOURIST) && !c->floorit) options[n++] = TS_WISH_FASTER;
     if (type != TS_P_HURRY && type != TS_P_VIP) options[n++] = TS_WISH_STOP;
+    /* 0.5.1: a supercar makes people want to feel it (car fans most of all); not the calm ones, not a wedding */
+    if (supercar(c) && !c->floorit && type != TS_P_RELAXED && type != TS_P_WEDDING && type != TS_P_BUSINESS) {
+        options[n++] = TS_WISH_FLOORIT;
+        if (type == TS_P_FAN || type == TS_P_TOURIST) options[n++] = TS_WISH_FLOORIT, options[n++] = TS_WISH_FLOORIT;
+    }
     int wish = options[random_below(c, n)];
     if (wish == TS_WISH_STOP) {
         c->wish_place = stop_place(c);
@@ -70,17 +91,23 @@ static void wish_begin(TsCore *c) {
     switch (wish) {
     case TS_WISH_SLOWER:
         c->wish_limit = max <= 100 ? 60 : 70;
-        c->wish_until = c->t + 30.0;
+        c->job.max_kmh = c->wish_limit; /* the sign shows it from now on, and it counts like the passenger's limit */
+        c->wish_over_since = 0.0;
         say(c, 0, L_WISH_SLOWER, 1);
         break;
     case TS_WISH_SMOOTH:
-        c->wish_until = c->t + 25.0;
+        c->wish_slips = 0;
+        c->wish_was_harsh = 1; /* a jolt going on right now doesn't count */
         say(c, 0, L_WISH_SMOOTH, 1);
         break;
     case TS_WISH_FASTER:
         c->wish_limit = max >= 140 ? 120 : 100;
-        c->wish_until = c->t + 25.0;
         say(c, 1, L_WISH_FASTER, 1);
+        break;
+    case TS_WISH_FLOORIT:
+        c->wish_limit = 180;
+        c->floorit = 1; /* no limit for the rest of the ride, even if the speed isn't reached */
+        say(c, 1, L_WISH_FLOORIT, 1);
         break;
     case TS_WISH_STOP: {
         c->wish_stop_stage = 1;
@@ -96,6 +123,7 @@ static void wish_begin(TsCore *c) {
 
 void wish_step(TsCore *c) {
     if (c->mode != TS_UBER || c->stage != TS_UBER_TO_DEST) return;
+    if (c->job.pool && c->pool_stage < 2) return; /* 0.6: a shared ride: wishes only once the first got out */
     if (c->wish == TS_WISH_NONE) {
         if (c->extras_off) return;
         int most = c->job.ptype == TS_P_VIP || c->job.ptype == TS_P_WEDDING ? 2 : 1;
@@ -107,17 +135,26 @@ void wish_step(TsCore *c) {
     }
     double since = c->t - c->wish_start;
     switch (c->wish) {
-    case TS_WISH_SLOWER:
-        if (since > 5.0 && c->speed * 3.6f > (float)unit_kmh(c, c->wish_limit) + 3.0f) wish_end(c, 0);
-        else if (c->t >= c->wish_until) wish_end(c, 1);
+    case TS_WISH_SLOWER: { /* until the destination (wish_arrived_at_dest says thanks) */
+        int clearly = c->speed * 3.6f > (float)unit_kmh(c, c->wish_limit) + 10.0f;
+        if (since < 8.0 || !clearly) c->wish_over_since = 0.0;
+        else if (c->wish_over_since <= 0.0) c->wish_over_since = c->t;
+        else if (c->t - c->wish_over_since >= 2.0) {
+            if (c->wish_slips++ == 0) say(c, 3, L_WISH_SLIP, 1), c->wish_over_since = 0.0; /* one reminder */
+            else wish_end(c, 0);
+        }
         break;
-    case TS_WISH_SMOOTH:
-        if (since > 2.0 && c->was_harsh) wish_end(c, 0);
-        else if (c->t >= c->wish_until) wish_end(c, 1);
+    }
+    case TS_WISH_SMOOTH: /* until the destination; the first slip gets a remark */
+        if (c->was_harsh && !c->wish_was_harsh && since > 3.0) {
+            if (c->wish_slips++ == 0) say(c, 3, L_WISH_SLIP, 1);
+            else wish_end(c, 0);
+        }
+        if (c->wish == TS_WISH_SMOOTH) c->wish_was_harsh = c->was_harsh;
         break;
     case TS_WISH_FASTER:
+    case TS_WISH_FLOORIT:
         if (c->speed * 3.6f >= (float)unit_kmh(c, c->wish_limit)) wish_end(c, 1);
-        else if (c->t >= c->wish_until) wish_end(c, 0);
         break;
     case TS_WISH_STOP: {
         const float *at = ts_places[c->wish_place].pos;
@@ -143,16 +180,17 @@ void wish_arrived_at_dest(TsCore *c) {
 void wish_chip(const TsCore *c, char *out, size_t size) {
     out[0] = 0;
     if (c->mode != TS_UBER || c->wish == TS_WISH_NONE) return;
-    char time[16];
-    double left = c->wish_until - c->t;
-    format_time(time, sizeof(time), left > 0.0 ? left : 0.0);
+    /* 0.5.1: no timer: a wish holds until the destination */
     switch (c->wish) {
     case TS_WISH_SLOWER:
-        snprintf(out, size, "%s %d %s · %s", T(c, "Wunsch: unter", "Wish: under"), ts_speed_shown(c, c->wish_limit), ts_speed_unit(c), time);
+        snprintf(out, size, "%s %d", T(c, "Bis Ziel: unter", "Till end: under"), ts_speed_shown(c, c->wish_limit)); /* the sign shows the unit */
         break;
-    case TS_WISH_SMOOTH: snprintf(out, size, "%s · %s", T(c, "Wunsch: ganz sanft", "Wish: smooth"), time); break;
+    case TS_WISH_SMOOTH: snprintf(out, size, "%s", T(c, "Bis Ziel: ganz sanft", "Till end: smooth")); break;
     case TS_WISH_FASTER:
-        snprintf(out, size, "%s %d %s · %s", T(c, "Wunsch: über", "Wish: over"), ts_speed_shown(c, c->wish_limit), ts_speed_unit(c), time);
+        snprintf(out, size, "%s %d %s", T(c, "Wunsch: einmal", "Wish: hit"), ts_speed_shown(c, c->wish_limit), ts_speed_unit(c));
+        break;
+    case TS_WISH_FLOORIT:
+        snprintf(out, size, "%s %d %s", T(c, "Vollgas!", "Floor it!"), ts_speed_shown(c, c->wish_limit), ts_speed_unit(c));
         break;
     case TS_WISH_STOP:
         snprintf(out, size, "%s", c->wish_stop_stage == 2 ? T(c, "Kurzer Halt ...", "Quick stop ...") : T(c, "Wunsch: kurz halten", "Wish: quick stop"));

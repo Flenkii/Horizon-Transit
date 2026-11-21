@@ -21,6 +21,9 @@ enum {
     /* 0.4.1: talk by passenger kind and by where you are */
     L_HURRY_TALK, L_FAN_TALK, L_TOWN_TALK, L_FESTIVAL_TALK, L_COUNTRY_TALK,
     L_THOUGHT, /* 0.4.2: a quiet passenger's thought about the driving (shown as "Name (thinks)", not spoken) */
+    L_WISH_FLOORIT, L_FLOORIT_DONE, L_WISH_SLIP, /* 0.5.1 */
+    L_RATE_GREAT, L_RATE_GOOD, L_RATE_OK, L_RATE_BAD, /* 0.6: the comment on the card after a ride (short) */
+    L_POOL_HELLO, L_POOL_REPLY, /* 0.6: a shared ride: the second says hello, the first answers */
     L_KINDS
 };
 

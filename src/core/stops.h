@@ -1,8 +1,10 @@
 #ifndef TS_STOPS_H
 #define TS_STOPS_H
-/* Places in the game world, all taken from the game's own trigger zones (tools/gen_stops.py). */
+/* Places in the game world, all taken from the game's own files (tools/gen_stops.py). */
 
-enum { TS_PLACE_FESTIVAL = 0, TS_PLACE_OUTPOST = 1, TS_PLACE_SPOT = 2 };
+/* SPOT: a race start on the land (on a road); STOP: a bus stop sign the map makers put up; PARKING: one of the
+   game's parking spots (0.8). STOP and PARKING are "real" places: rides and buses use them first. */
+enum { TS_PLACE_FESTIVAL = 0, TS_PLACE_OUTPOST = 1, TS_PLACE_SPOT = 2, TS_PLACE_STOP = 3, TS_PLACE_PARKING = 4 };
 
 typedef struct {
     const char *name; /* UTF-8, shown to the player */

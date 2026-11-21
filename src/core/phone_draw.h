@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include "jobs.h"
 
-enum { TS_THEME_NIGHT = 0, TS_THEME_LIGHT, TS_THEME_FESTIVAL, TS_THEME_OCEAN, TS_THEME_CARBON, TS_THEME_RIVIERA, TS_THEME_GOLD, TS_THEMES };
+enum { TS_THEME_NIGHT = 0, TS_THEME_LIGHT, TS_THEME_FESTIVAL, TS_THEME_OCEAN, TS_THEME_CARBON, TS_THEME_RIVIERA, TS_THEME_GOLD, TS_THEME_PURE, TS_THEMES };
 
 enum { TS_TEXT_LEFT = 0, TS_TEXT_CENTER, TS_TEXT_RIGHT };
 
@@ -29,6 +29,14 @@ typedef struct {
     void *user;
 } TsPhoneCanvas;
 
+/* 0.5: the device the app runs on: the phone (as before), the Edge (slim, punch-hole camera, Android keys),
+   the tablet (landscape: the list on the left, details, the route and the logbook on the right) */
+enum { TS_DEVICE_PHONE = 0, TS_DEVICE_EDGE, TS_DEVICE_TABLET, TS_DEVICES };
+void ts_device_size(int device, float scale, int *w, int *h);
+void ts_device_draw(const TsHud *h, int device, int theme, float scale, const char *clock, TsPhoneCanvas *cv);
+void ts_device_finish(int device, int theme, float scale, TsPhoneCanvas *cv);
+const char *ts_device_name(int device, int german);
+
 /* the buffer's size at this scale (1 = a 1080-line picture), shadow margin included */
 void ts_phone_size(float scale, int *w, int *h);
 /* draws the phone; clock is "18:56" */
@@ -37,6 +45,10 @@ void ts_phone_draw(const TsHud *h, int theme, float scale, const char *clock, Ts
 void ts_phone_finish(int theme, float scale, TsPhoneCanvas *cv);
 
 const char *ts_theme_name(int theme, int german);
+
+/* 0.9.1: where ts_device_draw put the map (pixels x0, y0, x1, y1; all 0 = no map) */
+extern int ts_map_rect_px[4];
+extern int ts_tab_rect_px[4]; /* ... the tabs */
 
 /* The speed-limit sign (white disc, red ring, the number) shown at the top left while a passenger rides.
    `unit` ("km/h" / "mph") goes small under the number; `flash` = the passenger thinks it's too fast (yellow). */
@@ -47,7 +59,7 @@ void ts_sign_finish(float scale, TsPhoneCanvas *cv); /* after the texts: premult
 /* The ride panel by the speedometer (0.4.2): the speed-limit sign, the G-meter (a circle: inside = the passenger is
    fine, the dot = how hard you brake, accelerate and corner), the time left and the passenger's mood, the wish. */
 void ts_dash_size(float scale, int *w, int *h);
-void ts_dash_draw(const TsHud *h, float scale, TsPhoneCanvas *cv);
+void ts_dash_draw(const TsHud *h, int theme, float scale, TsPhoneCanvas *cv); /* 0.5.1: in the phone's design, as glass */
 void ts_dash_finish(float scale, TsPhoneCanvas *cv); /* after the texts */
 
 /* The passengers' lines in an own window (0.4.2), for when the platform's HUD layer is off: the newest at the bottom. */
@@ -58,7 +70,7 @@ typedef struct {
     int style; /* as TsEvent.style */
 } TsFeedLine;
 void ts_feed_size(float scale, int *w, int *h);
-void ts_feed_draw(const TsFeedLine *lines, int n, float scale, TsPhoneCanvas *cv);
+void ts_feed_draw(const TsFeedLine *lines, int n, int theme, float scale, TsPhoneCanvas *cv);
 void ts_feed_finish(float scale, TsPhoneCanvas *cv); /* after the texts */
 
 #endif

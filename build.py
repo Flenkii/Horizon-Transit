@@ -7,7 +7,7 @@ Braucht: pip install ziglang==0.15.2   (ein C-Compiler fuer Windows, ohne Visual
 import os, shutil, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-CORE = ["src/core/jobs.c", "src/core/stops_data.c", "src/core/cars_data.c", "src/core/lines.c", "src/core/phone_draw.c", "src/core/people.c", "src/core/career.c", "src/core/wishes.c", "src/core/timetable.c", "src/core/bus_sql.c", "src/core/shop.c", "src/core/doors.c"]
+CORE = ["src/core/jobs.c", "src/core/stops_data.c", "src/core/cars_data.c", "src/core/lines.c", "src/core/phone_draw.c", "src/core/people.c", "src/core/career.c", "src/core/wishes.c", "src/core/timetable.c", "src/core/bus_sql.c", "src/core/shop.c", "src/core/doors.c", "src/core/service.c", "src/core/chimes.c", "src/core/talk.c", "src/core/market.c", "src/core/cards.c", "src/core/map.c", "src/core/mapview.c", "src/core/gamemap.c", "src/core/inflate.c", "src/core/bc7.c", "src/core/phone_anim.c"]
 
 
 def run(cmd):
@@ -32,22 +32,35 @@ def po_header():
             f.write(text)
 
 
+# the sounds built into the DLL, in this order (mod.c's SFX_ numbers): the doors are recordings (Sounds From The Lab,
+# royalty-free), the rest is made by tools/gen_sounds.py
+SOUNDS = ["door_open", "door_close", "speed_warn", "speed_alarm", "bus_bell", "bus_gong", "ride_request", "payout"]
+
+
 def sounds_header():
-    """sounds/door_open.wav und door_close.wav als C-Bytes in src/door_sounds.h (die Geraeusche stecken in der DLL)"""
-    out = ["/* The door sounds (sounds/door_open.wav and door_close.wav, built in by build.py: don't edit here). Sounds From The Lab, royalty-free. */",
-           "#ifndef TS_DOOR_SOUNDS_H", "#define TS_DOOR_SOUNDS_H"]
-    for name in ("door_open", "door_close"):
+    """sounds/*.wav als C-Bytes in src/sounds.h (die Geraeusche stecken in der DLL)"""
+    out = ["/* The mod's sounds (the WAVs in sounds/, built in by build.py: don't edit here). door_open/door_close: Sounds From The Lab,",
+           "   royalty-free; the others are made by tools/gen_sounds.py. */",
+           "#ifndef TS_SOUNDS_H", "#define TS_SOUNDS_H",
+           "enum { " + ", ".join("SFX_" + n.upper() + (" = 0" if i == 0 else "") for i, n in enumerate(SOUNDS)) + ", SFX_COUNT };"]
+    for name in SOUNDS:
         data = open(os.path.join(ROOT, "sounds", name + ".wav"), "rb").read()
         out.append("static const unsigned char ts_%s_wav[%d] = {" % (name, len(data)))
         for i in range(0, len(data), 32):
             out.append("    " + ",".join(str(b) for b in data[i:i + 32]) + ",")
         out.append("};")
-    out += ["#endif", ""]
+    out.append("static const struct { const wchar_t *file; const unsigned char *data; unsigned size; } ts_sounds[SFX_COUNT] = {")
+    for name in SOUNDS:
+        out.append('    {L"%s.wav", ts_%s_wav, sizeof(ts_%s_wav)},' % (name, name, name))
+    out += ["};", "#endif", ""]
     text = "\n".join(out)
-    path = os.path.join(ROOT, "src", "door_sounds.h")
+    path = os.path.join(ROOT, "src", "sounds.h")
     if not os.path.exists(path) or open(path, encoding="utf-8").read() != text:
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
+    old = os.path.join(ROOT, "src", "door_sounds.h")
+    if os.path.exists(old):
+        os.remove(old)
 
 
 def main():

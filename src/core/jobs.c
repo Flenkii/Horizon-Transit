@@ -207,6 +207,9 @@ static void english_place(const char *de, char *out, size_t n) {
     if (!strncmp(rest, "Landstraße bei ", 16)) {
         k = (size_t)snprintf(tmp, sizeof(tmp), "Road near ");
         rest += 16;
+    } else if (!strncmp(rest, "Bei ", 4)) {
+        k = (size_t)snprintf(tmp, sizeof(tmp), "Near ");
+        rest += 4;
     }
     while (*rest && k + 1 < sizeof(tmp)) {
         if (!strncmp(rest, "Nizza", 5)) {
@@ -215,6 +218,12 @@ static void english_place(const char *de, char *out, size_t n) {
         } else if (!strncmp(rest, "Treffpunkt", 10)) {
             k += (size_t)snprintf(tmp + k, sizeof(tmp) - k, "Spot");
             rest += 10;
+        } else if (!strncmp(rest, "Haltestelle", 11)) {
+            k += (size_t)snprintf(tmp + k, sizeof(tmp) - k, "Bus Stop");
+            rest += 11;
+        } else if (!strncmp(rest, "Parkplatz", 9)) {
+            k += (size_t)snprintf(tmp + k, sizeof(tmp) - k, "Car Park");
+            rest += 9;
         } else tmp[k++] = *rest++;
         if (k >= sizeof(tmp)) k = sizeof(tmp) - 1;
     }
@@ -247,6 +256,7 @@ int unit_kmh(const TsCore *c, int kmh) {
 }
 
 int ride_max_kmh(const TsCore *c) {
+    if (c->mode == TS_UBER && c->floorit) return 400; /* 0.5.1: "floor it": no limit for the rest of the ride */
     return unit_kmh(c, c->mode == TS_BUS ? TS_BUS_MAX_KMH : c->job.max_kmh > 0 ? c->job.max_kmh : 120);
 }
 
@@ -256,7 +266,7 @@ int ts_line_is_complaint(int kind) {
     switch (kind) {
     case L_BRAKE: case L_CORNER: case L_ACCEL: case L_SPEEDING: case L_CRASH: case L_HURRY_NAG: case L_LATE:
     case L_BUS_CRASH: case L_BUS_BRAKE: case L_BUS_CORNER: case L_BUS_SPEEDING: case L_BUS_LATE:
-    case L_DISLIKES_CAR: case L_REG_LAST_BAD: case L_WISH_FAILED: case L_THOUGHT:
+    case L_DISLIKES_CAR: case L_REG_LAST_BAD: case L_WISH_FAILED: case L_THOUGHT: case L_WISH_SLIP:
         return 1;
     default:
         return 0;
@@ -288,6 +298,14 @@ void say(TsCore *c, int style, int kind, int force) {
     if (kind < 0 || kind >= L_KINDS || !ts_line_sets[kind].count) return;
     if (!force && c->t < c->chat_cooldown) return;
     if (c->complaints_off && ts_line_is_complaint(kind)) return;
+    char text[TS_TEXT];
+    line_text(c, kind, text, sizeof(text));
+    if (text[0]) chat(c, style, text, force);
+}
+
+void line_text(TsCore *c, int kind, char *out, size_t size) {
+    out[0] = 0;
+    if (kind < 0 || kind >= L_KINDS || !ts_line_sets[kind].count) return;
     const TsLineSet *set = &ts_line_sets[kind];
     int pick = pick_line(c, kind);
     if (pick < 0) return;
@@ -328,7 +346,7 @@ void say(TsCore *c, int style, int kind, int force) {
         text[n++] = *line++;
     }
     text[n] = 0;
-    chat(c, style, text, force);
+    snprintf(out, size, "%s", text);
 }
 
 /* where the car is, for what passengers talk about: the festival, a town, the open country (-1: in between) */
@@ -387,6 +405,24 @@ void ts_set_car(TsCore *c, const char *media) {
     }
 }
 
+int ts_bus_stop(const TsCore *c, int line, int i) {
+    const TsLine *l = &ts_lines[line];
+    int n = (int)l->stop_count;
+    if (i < 0) i = 0;
+    if (i >= n) i = n - 1;
+    return l->stops[c->line_rev ? n - 1 - i : i];
+}
+
+/* 0.5: which way a line will run: a ring the other way round every second time, a line from its nearer end */
+int bus_direction(const TsCore *c, int line) {
+    const TsLine *l = &ts_lines[line];
+    int n = (int)l->stop_count;
+    if (l->stops[0] == l->stops[n - 1]) return line < 8 ? c->line_done[line] % 2 : 0;
+    if (!c->car_ok) return 0;
+    float to_first = ts_distance_xz(c->car.pos, ts_places[l->stops[0]].pos), to_last = ts_distance_xz(c->car.pos, ts_places[l->stops[n - 1]].pos);
+    return to_last + 200.0f < to_first;
+}
+
 void set_nav(TsCore *c, const float at[3]) {
     c->nav_on = 1;
     c->nav_target[0] = at[0], c->nav_target[1] = at[1], c->nav_target[2] = at[2];
@@ -437,7 +473,10 @@ void ts_init(TsCore *c, uint32_t seed, int german) {
     c->reputation = 50.0f;
     c->car_group = c->car_index = -1;
     c->demand = 1;
+    c->hot[0].place = c->hot[1].place = -1; /* 0.6 */
+    c->hot_rng = c->rng ^ 0x9E3779B9u;
     c->area = -1;
+    c->ask = c->replied = -1; /* 0.5.1 */
     c->wish_place = -1;
     c->setting_pressed = -1;
     c->door = -1;
@@ -465,6 +504,15 @@ void ts_car_sample(TsCore *c, float dt, const TsCar *car) {
     c->car_seen_t = c->t;
     c->speed = sqrtf(car->vel[0] * car->vel[0] + car->vel[1] * car->vel[1] + car->vel[2] * car->vel[2]);
 
+    if (c->speed > 4.0f) { /* which way the forward vector really points: most driving goes forwards */
+        float d = (car->vel[0] * car->fwd[0] + car->vel[1] * car->fwd[1] + car->vel[2] * car->fwd[2]) / c->speed;
+        if (fabsf(d) > 0.7f) {
+            float k = clampf(dt / 3.0f, 0.0f, 1.0f);
+            c->fwd_sign += ((d > 0 ? 1.0f : -1.0f) - c->fwd_sign) * k;
+        }
+    }
+    float fs = c->fwd_sign < -0.2f ? -1.0f : 1.0f;
+
     int jump = 0, jolt = 0;
     if (c->have_prev) {
         float moved = sqrtf((car->pos[0] - c->prev_pos[0]) * (car->pos[0] - c->prev_pos[0]) +
@@ -474,7 +522,7 @@ void ts_car_sample(TsCore *c, float dt, const TsCar *car) {
         jump = moved > expected + 5.0f; /* rewind, reset to the road, fast travel: not driving */
         if (!jump) {
             float dv[3] = {car->vel[0] - c->prev_vel[0], car->vel[1] - c->prev_vel[1], car->vel[2] - c->prev_vel[2]};
-            float along = (dv[0] * car->fwd[0] + dv[1] * car->fwd[1] + dv[2] * car->fwd[2]) / dt;
+            float along = fs * (dv[0] * car->fwd[0] + dv[1] * car->fwd[1] + dv[2] * car->fwd[2]) / dt;
             float side = (dv[0] * car->right[0] + dv[1] * car->right[1] + dv[2] * car->right[2]) / dt;
             float k = clampf(dt / 0.4f, 0.0f, 1.0f); /* smoothed over 0.4 s: bumps and kerbs don't count */
             c->acc_long += (along - c->acc_long) * k;
@@ -510,13 +558,14 @@ void ts_car_sample(TsCore *c, float dt, const TsCar *car) {
     /* the passenger's kind changes the rules: a relaxed one minds jolts more, a car fan enjoys acceleration */
     int bus = c->mode == TS_BUS, type = bus ? TS_P_NORMAL : c->job.ptype;
     static const float type_soft[TS_P_KINDS] = {1.0f, 1.5f, 1.0f, 1.0f, 1.5f, 1.3f, 1.7f, 0.9f};
-    float soft = type_soft[type < 0 || type >= TS_P_KINDS ? 0 : type] * (ts_has(c, TS_SHOP_COMFORT) ? 0.75f : 1.0f);
+    float soft = type_soft[type < 0 || type >= TS_P_KINDS ? 0 : type] * (ts_has(c, TS_SHOP_COMFORT) ? 0.75f : 1.0f) *
+                 (bus ? 1.0f : market_class_soft(c->job.ride_class)); /* 0.6: Black is strict, Saver easy-going */
     float limit = (float)ride_max_kmh(c) / 3.6f;
     float drop = 0.0f;
     int harsh = 0, fun = 0;
     /* 0.4: more forgiving (players: "they moan too often"): higher limits, less loss, 10 km/h leeway */
     if (c->acc_long > TS_LIM_GAS) {
-        if (type == TS_P_FAN) fun = 1;
+        if (type == TS_P_FAN || (!bus && c->floorit)) fun = 1; /* 0.5.1: they asked for it */
         else drop += 1.4f * soft, harsh = 1;
     }
     if (c->acc_long < -12.0f) drop += 4.0f * soft, harsh = 2;
@@ -587,12 +636,16 @@ static int same_area(int a, int b) {
     return la == lb && !strncmp(na, nb, la);
 }
 
+/* 0.8: a real place (bus stop, parking spot, festival, outpost), not a race start on the land */
+static int place_real(int place) { return ts_places[place].kind != TS_PLACE_SPOT; }
+
 /* 0.4.2: more variety: places of the last rides are left out, and a destination in another area than the pickup
-   (`not_this`) is preferred, when enough others are in range */
-int pick_place(TsCore *c, const float from[3], float min_m, float max_m, int not_this) {
+   (`not_this`) is preferred, when enough others are in range. 0.8: real places first (`real_only`); -2 when fewer
+   than two fresh real places are in range */
+static int pick_place_of(TsCore *c, const float from[3], float min_m, float max_m, int not_this, int real_only) {
     int candidates[512], n = 0, fresh[512], nf = 0, away[512], na = 0;
     for (unsigned i = 0; i < ts_place_count && n < 512; ++i) {
-        if ((int)i == not_this) continue;
+        if ((int)i == not_this || (real_only && !place_real((int)i))) continue;
         float d = ts_distance_xz(from, ts_places[i].pos);
         if (d >= min_m && d <= max_m) {
             candidates[n++] = (int)i;
@@ -602,6 +655,7 @@ int pick_place(TsCore *c, const float from[3], float min_m, float max_m, int not
             }
         }
     }
+    if (real_only && nf < 2) return -2;
     if (na >= 2 && random_unit(c) < 0.75f) return away[random_below(c, na)];
     if (nf >= 2) return fresh[random_below(c, nf)];
     if (!n) { /* nothing in range: the nearest one that is far enough */
@@ -616,6 +670,16 @@ int pick_place(TsCore *c, const float from[3], float min_m, float max_m, int not
     return candidates[random_below(c, n)];
 }
 
+/* 0.8: people get in and out where people are: real places nine times in ten, a race start on the land only where
+   no real place is in range (or now and then, for the countryside) */
+int pick_place(TsCore *c, const float from[3], float min_m, float max_m, int not_this) {
+    if (random_unit(c) < 0.9f) {
+        int real = pick_place_of(c, from, min_m, max_m, not_this, 1);
+        if (real >= 0) return real;
+    }
+    return pick_place_of(c, from, min_m, max_m, not_this, 0);
+}
+
 /* by passenger kind: pay, time limit, speed limit */
 static const float type_pay[TS_P_KINDS] = {1.0f, 0.9f, 1.3f, 1.15f, 2.2f, 1.5f, 1.8f, 1.25f};
 static const float type_time[TS_P_KINDS] = {1.0f, 1.3f, 0.75f, 0.9f, 0.85f, 0.9f, 1.3f, 1.1f};
@@ -627,6 +691,8 @@ static int uber_pay_typed(float trip_m, float sat, int type, float factor) {
     if (sat >= 90.0f) pay *= 1.15f; /* tip */
     return (int)(pay / 5.0f + 0.5f) * 5;
 }
+
+int uber_pay(float trip_m, float sat, int type, float factor) { return uber_pay_typed(trip_m, sat, type, factor); }
 
 /* the area around the car: how many places are near (town, festival) and the nearest town's name */
 static void read_area(TsCore *c) {
@@ -646,7 +712,8 @@ static int special_type(TsCore *c, int slot) {
     if (c->extras_off) return -1;
     int g = c->car_group, premium = ts_has(c, TS_SHOP_PREMIUM);
     float rep = c->reputation + (premium ? 10.0f : 0.0f), more = premium ? 1.5f : 1.0f, roll = random_unit(c);
-    if (rep >= 60.0f && (g == TS_GROUP_SALOON || g == TS_GROUP_SUPER || g == TS_GROUP_CLASSIC || g == TS_GROUP_SPORTS) && roll < 0.22f * more)
+    float vip_more = c->tier >= TS_TIER_GOLD ? 1.5f : 1.0f; /* 0.6: the Gold tier brings more VIPs */
+    if (rep >= 60.0f && (g == TS_GROUP_SALOON || g == TS_GROUP_SUPER || g == TS_GROUP_CLASSIC || g == TS_GROUP_SPORTS) && roll < 0.22f * more * vip_more)
         return TS_P_VIP;
     roll = random_unit(c);
     if (rep >= 35.0f && ((g == TS_GROUP_SALOON && roll < 0.45f * more) || (g == TS_GROUP_SUPER && roll < 0.12f * more))) return TS_P_BUSINESS;
@@ -657,8 +724,81 @@ static int special_type(TsCore *c, int slot) {
     return -1;
 }
 
+static int type_max_kmh(const TsCore *c, int type) {
+    switch (type) {
+    case TS_P_RELAXED: return 90;
+    case TS_P_HURRY: return 140;
+    case TS_P_FAN: return c->car_kind == TS_CAR_DREAM ? 180 : 160;
+    case TS_P_VIP: return 130;
+    case TS_P_BUSINESS: return 120;
+    case TS_P_WEDDING: return 80;
+    case TS_P_TOURIST: return 100;
+    default: return 120;
+    }
+}
+
+/* 0.8: keeps only the real places of a candidate list, if there are any */
+static int real_first(int *cand, int n) {
+    int r = 0;
+    for (int i = 0; i < n; ++i)
+        if (place_real(cand[i])) cand[r++] = cand[i];
+    return r ? r : n;
+}
+
+/* 0.6: a shared ride: a second passenger who gets in on the way (between a fifth and three fifths of the way, at
+   most 900 m off the line) and gets out after the first, 0.5 to 2.5 km on. Both pay 20 % less than alone. */
+static int make_pool(TsCore *c, TsOffer *o, int taken_count) {
+    const float *a = ts_places[o->pickup].pos, *b = ts_places[o->dest].pos;
+    float abx = b[0] - a[0], abz = b[2] - a[2], len2 = abx * abx + abz * abz, len = sqrtf(len2);
+    if (len < 1500.0f) return 0;
+    int cand[256], n = 0;
+    for (unsigned i = 0; i < ts_place_count && n < 256; ++i) {
+        if ((int)i == o->pickup || (int)i == o->dest) continue;
+        const float *p = ts_places[i].pos;
+        float apx = p[0] - a[0], apz = p[2] - a[2];
+        float t = (apx * abx + apz * abz) / len2, side = fabsf(apx * abz - apz * abx) / len;
+        if (t >= 0.2f && t <= 0.6f && side < 900.0f && ts_distance_xz(a, p) >= 400.0f) cand[n++] = (int)i;
+    }
+    n = real_first(cand, n);
+    if (!n) return 0;
+    int pp = cand[random_below(c, n)];
+    n = 0;
+    float ab = ts_distance_xz(a, b);
+    for (unsigned i = 0; i < ts_place_count && n < 256; ++i) {
+        if ((int)i == o->pickup || (int)i == o->dest || (int)i == pp) continue;
+        float d = ts_distance_xz(b, ts_places[i].pos);
+        if (d >= 500.0f && d <= 2500.0f && ts_distance_xz(a, ts_places[i].pos) > ab * 0.8f) cand[n++] = (int)i;
+    }
+    n = real_first(cand, n);
+    if (!n) return 0;
+    int pd = cand[random_below(c, n)];
+    int who = -1;
+    for (int tries = 0; tries < 30 && who < 0; ++tries) {
+        int k = random_below(c, PASSENGER_COUNT), taken = k == o->passenger || k == c->job.passenger;
+        for (int j = 0; j < taken_count; ++j) taken |= c->offers[j].passenger == k || (c->offers[j].pool && c->offers[j].pool_passenger == k);
+        if (!taken) who = k;
+    }
+    if (who < 0) return 0;
+    o->pool = 1;
+    o->pool_pickup = pp, o->pool_dest = pd, o->pool_passenger = who;
+    o->pool_ptype = random_unit(c) < 0.5f ? TS_P_NORMAL : TS_P_RELAXED;
+    o->pool_trip_m = place_distance(pp, pd) * TS_ROAD_FACTOR;
+    o->party = 1;
+    if (o->ptype != TS_P_NORMAL && o->ptype != TS_P_RELAXED && o->ptype != TS_P_HURRY) o->ptype = TS_P_NORMAL;
+    o->max_kmh = type_max_kmh(c, o->ptype) < type_max_kmh(c, o->pool_ptype) ? type_max_kmh(c, o->ptype) : type_max_kmh(c, o->pool_ptype);
+    /* the first's time covers the detour and the stop */
+    float route_m = (place_distance(o->pickup, pp) + place_distance(pp, o->dest)) * TS_ROAD_FACTOR;
+    o->limit_s = (route_m / TS_UBER_AVG_SPEED + 75.0f) * c->time_factor * (ts_has(c, TS_SHOP_DISPATCH) ? 1.15f : 1.0f) *
+                 market_class_time(o->ride_class);
+    o->limit_s = (float)((int)(o->limit_s / 15.0f + 0.5f) * 15);
+    o->pay_factor *= 0.8f;
+    o->pay = uber_pay_typed(o->trip_m, 80.0f, o->ptype, o->pay_factor) + uber_pay_typed(o->pool_trip_m, 80.0f, o->pool_ptype, o->pay_factor);
+    return 1;
+}
+
 static void make_offers(TsCore *c) {
     c->offer_count = 0;
+    c->offers_hailed = 0;
     if (!c->car_ok) return;
     read_area(c);
     /* a bad name, or the countryside: fewer requests */
@@ -669,7 +809,9 @@ static void make_offers(TsCore *c) {
     for (int i = 0; i < count; ++i) {
         TsOffer *o = &c->offers[c->offer_count];
         memset(o, 0, sizeof(*o));
-        o->pickup = pick_place(c, c->car.pos, 200.0f, c->demand == 0 ? 3000.0f : 2200.0f, -1);
+        o->pickup = -1;
+        if (i == 0) o->pickup = market_hot_pickup(c); /* 0.6: near a hotspot the first request comes from there */
+        if (o->pickup < 0) o->pickup = pick_place(c, c->car.pos, 200.0f, c->demand == 0 ? 3000.0f : 2200.0f, -1);
         if (o->pickup < 0) break;
         int slot = count == 2 ? i + 1 : i; /* with two requests: the medium and the long one */
         float min_trip = slot == 0 ? 1200.0f : slot == 1 ? 2500.0f : 4000.0f; /* short, medium, long */
@@ -691,20 +833,16 @@ static void make_offers(TsCore *c) {
             float hurry = c->demand == 2 ? 0.28f : 0.2f;
             o->ptype = roll < fan ? TS_P_FAN : roll < fan + 0.25f ? TS_P_RELAXED : roll < fan + 0.25f + hurry ? TS_P_HURRY : TS_P_NORMAL;
         }
-        switch (o->ptype) {
-        case TS_P_RELAXED: o->max_kmh = 90; break;
-        case TS_P_HURRY: o->max_kmh = 140; break;
-        case TS_P_FAN: o->max_kmh = c->car_kind == TS_CAR_DREAM ? 180 : 160; break;
-        case TS_P_VIP: o->max_kmh = 130; break;
-        case TS_P_BUSINESS: o->max_kmh = 120; break;
-        case TS_P_WEDDING: o->max_kmh = 80; break;
-        case TS_P_TOURIST: o->max_kmh = 100; break;
-        default: o->max_kmh = 120; break;
-        }
+        o->max_kmh = type_max_kmh(c, o->ptype);
+        /* 0.6: the ride's class by the car, the group's size, a hotspot's surcharge */
+        o->ride_class = market_pick_class(c, o->ptype);
+        o->party = o->ride_class == TS_CLASS_XL ? 2 + random_below(c, 3) : o->ptype == TS_P_WEDDING ? 2 : 1;
+        o->surge = market_surge(c, o->pickup);
         o->limit_s = (o->trip_m / TS_UBER_AVG_SPEED + 45.0f) * c->time_factor * type_time[o->ptype] *
-                     (ts_has(c, TS_SHOP_DISPATCH) ? 1.15f : 1.0f);
+                     (ts_has(c, TS_SHOP_DISPATCH) ? 1.15f : 1.0f) * market_class_time(o->ride_class);
         o->limit_s = (float)((int)(o->limit_s / 15.0f + 0.5f) * 15);
-        o->pay_factor = area_pay * career_pay_factor(c);
+        float extra = market_class_pay(o->ride_class) * o->surge; /* class and surcharge together at most x2 */
+        o->pay_factor = area_pay * career_pay_factor(c) * (extra > 2.0f ? 2.0f : extra);
         o->pay = uber_pay_typed(o->trip_m, 80.0f, o->ptype, o->pay_factor);
         /* someone who isn't already asking, and not the one just driven */
         for (int tries = 0; tries < 20; ++tries) {
@@ -713,8 +851,33 @@ static void make_offers(TsCore *c) {
             for (int k = 0; k < i; ++k) taken |= c->offers[k].passenger == o->passenger;
             if (!taken) break;
         }
+        /* 0.5: now and then a regular asks for you by name (a normal ride only): 15 % more. 0.8: a bit more often */
+        int regulars = 0;
+        for (int k = 0; k < PASSENGER_COUNT; ++k) regulars += c->met[k] >= 2;
+        int asked = 0;
+        for (int j = 0; j < i; ++j) asked |= c->offers[j].regular; /* one regular per list at most */
+        if (!c->extras_off && regulars && !asked && o->ptype < TS_P_VIP && random_unit(c) < 0.25f) {
+            int pick = -1, seen = 0;
+            for (int k = 0; k < PASSENGER_COUNT; ++k) {
+                if (c->met[k] < 2 || k == c->job.passenger) continue;
+                int taken = 0;
+                for (int j = 0; j < i; ++j) taken |= c->offers[j].passenger == k;
+                if (!taken && random_below(c, ++seen) == 0) pick = k;
+            }
+            if (pick >= 0) {
+                o->passenger = pick;
+                o->regular = 1;
+                o->pay_factor *= 1.15f;
+                o->pay = uber_pay_typed(o->trip_m, 80.0f, o->ptype, o->pay_factor);
+            }
+        }
+        /* 0.6: now and then the medium request is a shared ride (Saver and Comfort, ordinary passengers) */
+        if (!c->extras_off && slot == 1 && !o->regular && (o->ride_class == TS_CLASS_SAVER || o->ride_class == TS_CLASS_COMFORT) &&
+            o->ptype <= TS_P_HURRY && random_unit(c) < 0.3f)
+            make_pool(c, o, i);
         c->offer_count++;
     }
+    c->offers_t = c->t;
 }
 
 void ts_refresh_offers(TsCore *c) {
@@ -730,15 +893,19 @@ void ts_renew_nav(TsCore *c) {
 /* what can be picked on a tab: offers, bus lines, nothing on the account */
 static int tab_items(const TsCore *c, int tab) {
     return tab == TS_TAB_RIDES ? c->offer_count : tab == TS_TAB_BUS ? (int)ts_line_count : tab == TS_TAB_SHOP ? TS_SHOP_ITEMS
-         : tab == TS_TAB_SETTINGS ? c->setting_count : 1; /* the account: the shift */
+         : tab == TS_TAB_SETTINGS ? c->setting_count : 1; /* the account: the shift; the map: its zoom */
 }
 
 void ts_phone_toggle(TsCore *c) {
     c->phone_open = !c->phone_open;
     c->cancel_armed = 0;
+    c->map_view = 0, c->map_zoom = 0, c->job_tab = 0;
     if (c->phone_open) {
-        if (c->mode == TS_IDLE) make_offers(c);
-        else ts_renew_nav(c); /* opening the phone during a job sets the GPS again */
+        /* 0.5: a push request's offers stay for a minute (what the pop-up said is what the phone shows) */
+        /* 0.8: only offers a push request brought (before: any offers while a shift ran, so the phone kept showing
+           the same ones, even after a cancelled ride) */
+        if (c->mode == TS_IDLE && !(c->offer_count && c->offers_hailed && c->t - c->offers_t < 60.0)) make_offers(c);
+        else if (c->mode != TS_IDLE) ts_renew_nav(c); /* opening the phone during a job sets the GPS again */
         c->phone_sel = 0;
         c->phone_tab = TS_TAB_RIDES;
         if (c->mode == TS_IDLE && !c->car_ok)
@@ -750,6 +917,10 @@ void ts_phone_toggle(TsCore *c) {
 /* down: the next entry, past the last one on to the next tab (so a pad's one button reaches everything) */
 void ts_phone_next(TsCore *c) {
     if (!c->phone_open || c->mode != TS_IDLE) return;
+    if (c->map_view) { /* 0.7: the preview's two buttons */
+        c->map_btn = !c->map_btn;
+        return;
+    }
     if (c->phone_sel + 1 < tab_items(c, c->phone_tab)) {
         c->phone_sel++;
         return;
@@ -760,6 +931,10 @@ void ts_phone_next(TsCore *c) {
 
 void ts_phone_prev(TsCore *c) {
     if (!c->phone_open || c->mode != TS_IDLE) return;
+    if (c->map_view) {
+        c->map_btn = !c->map_btn;
+        return;
+    }
     if (c->phone_sel > 0) {
         c->phone_sel--;
         return;
@@ -770,12 +945,38 @@ void ts_phone_prev(TsCore *c) {
 }
 
 void ts_phone_tab(TsCore *c, int direction) {
-    if (!c->phone_open || c->mode != TS_IDLE) return;
+    if (!c->phone_open) return;
+    if (c->mode != TS_IDLE) { /* 0.7: the job and its map */
+        c->job_tab = !c->job_tab;
+        c->map_zoom = 0;
+        c->cancel_armed = 0;
+        return;
+    }
+    if (c->map_view) { /* the preview: the route / everything */
+        c->map_zoom = direction < 0;
+        return;
+    }
     c->phone_tab = (c->phone_tab + (direction < 0 ? TS_TABS - 1 : 1)) % TS_TABS;
     c->phone_sel = 0;
+    c->map_zoom = 0;
 }
 
+void ts_phone_back(TsCore *c) {
+    if (c->phone_open && c->mode == TS_IDLE && c->map_view) {
+        c->map_view = 0;
+        return;
+    }
+    if (c->phone_open && c->mode != TS_IDLE && c->job_tab) {
+        c->job_tab = 0;
+        return;
+    }
+    ts_phone_toggle(c);
+}
+
+static void plan_stop(TsCore *c);
+
 static void start_uber(TsCore *c, const TsOffer *o) {
+    service_job_starts(c);
     remember_place(c, o->pickup);
     remember_place(c, o->dest);
     c->mode = TS_UBER;
@@ -795,6 +996,9 @@ static void start_uber(TsCore *c, const TsOffer *o) {
     c->slow_since = c->t;
     c->memory_said = 0;
     wish_ride_start(c);
+    talk_ride_start(c);
+    c->pool_stage = 0, c->pool_stop_t = 0.0, c->pool_reply_at = 0.0, c->pool_paid = c->pool_fare = c->pool_tip = 0;
+    c->pool_first = o->passenger;
     set_nav(c, ts_places[o->pickup].pos);
     char text[TS_TEXT];
     snprintf(text, sizeof(text), "%s: %s", ts_passenger_name(o->passenger), ts_place_name(c, o->pickup));
@@ -802,6 +1006,8 @@ static void start_uber(TsCore *c, const TsOffer *o) {
 }
 
 static void start_bus(TsCore *c, int line) {
+    service_job_starts(c);
+    c->line_rev = bus_direction(c, line);
     c->mode = TS_BUS;
     c->line = line;
     c->stop_i = 0;
@@ -814,13 +1020,16 @@ static void start_bus(TsCore *c, int line) {
     c->leg_m = c->trip_driven_m = 0.0f;
     c->n_accel = c->n_brake = c->n_corner = c->n_crash = c->n_speeding = 0;
     c->calm_since = c->t;
-    const TsPlace *first = &ts_places[ts_lines[line].stops[0]];
+    const TsPlace *first = &ts_places[ts_bus_stop(c, line, 0)];
     float away = c->car_ok ? ts_distance_xz(c->car.pos, first->pos) : 0.0f;
     c->deadline = 0.0; /* no time limit on the way to the first stop */
     tt_start(c);
+    plan_stop(c);
+    c->stop_request = 1;
     set_nav(c, first->pos);
     char text[TS_TEXT];
-    snprintf(text, sizeof(text), "%s %s · %s", T(c, "Linie", "Line"), ts_lines[line].number, ts_place_name(c, ts_lines[line].stops[0]));
+    snprintf(text, sizeof(text), "%s %s · %s → %s", T(c, "Linie", "Line"), ts_lines[line].number, ts_place_name(c, ts_bus_stop(c, line, 0)),
+             ts_place_name(c, ts_bus_stop(c, line, (int)ts_lines[line].stop_count - 1)));
     toast(c, TS_ICON_ROADS, TS_SOUND_NOTIFY, T(c, "Buslinie gestartet", "Bus line started"), text);
     if (away > TS_ARRIVE_RADIUS) {
         char d[24];
@@ -832,6 +1041,7 @@ static void start_bus(TsCore *c, int line) {
 
 void ts_accept_row(TsCore *c, int row) {
     if (c->mode != TS_IDLE) return;
+    c->map_view = 0;
     if (row >= 0 && row < c->offer_count) start_uber(c, &c->offers[row]);
     else if (row >= TS_PHONE_OFFERS && row - TS_PHONE_OFFERS < (int)ts_line_count) {
         if (c->bus_needs_bus && c->car_kind != TS_CAR_BUS) {
@@ -857,11 +1067,13 @@ static void end_job(TsCore *c) {
     c->stage = 0;
     c->phone_open = 0;
     c->cancel_armed = 0;
+    c->job_tab = 0, c->map_zoom = 0, c->map_view = 0;
     clear_nav(c);
 }
 
 void ts_cancel(TsCore *c) {
     if (c->mode == TS_IDLE) return;
+    c->streak = 0;
     if (c->mode == TS_UBER) career_cancel(c, c->stage >= TS_UBER_TO_DEST);
     else if (c->onboard > 0) career_cancel(c, 1);
     if (c->mode == TS_UBER && c->stage >= TS_UBER_TO_DEST) {
@@ -889,6 +1101,10 @@ void ts_cancel(TsCore *c) {
 void ts_phone_accept(TsCore *c) {
     if (c->mode != TS_IDLE) { /* during a job the button cancels: press twice */
         if (!c->phone_open) return;
+        if (c->job_tab) { /* 0.7: on the job's map it zooms (0.9.1: the route, everything, navi) */
+            c->map_zoom = (c->map_zoom + 1) % 3;
+            return;
+        }
         if (!c->cancel_armed) {
             c->cancel_armed = 1;
             toast(c, TS_ICON_NONE, 0, T(c, "Auftrag abbrechen?", "Cancel the job?"),
@@ -899,6 +1115,21 @@ void ts_phone_accept(TsCore *c) {
         return;
     }
     if (!c->phone_open) return;
+    if (c->map_view) { /* 0.7: the preview's buttons: take it, back */
+        int row = c->phone_tab == TS_TAB_RIDES ? c->phone_sel : TS_PHONE_OFFERS + c->phone_sel;
+        if (c->map_btn) c->map_view = 0;
+        else if (c->phone_tab != TS_TAB_RIDES || c->phone_sel < c->offer_count) ts_accept_row(c, row);
+        else c->map_view = 0;
+        return;
+    }
+    if (c->map_preview && ((c->phone_tab == TS_TAB_RIDES && c->phone_sel < c->offer_count) || c->phone_tab == TS_TAB_BUS)) {
+        c->map_view = 1, c->map_btn = 0, c->map_zoom = 0;
+        return;
+    }
+    if (c->phone_tab == TS_TAB_MAP) {
+        c->map_zoom = (c->map_zoom + 1) % 4;
+        return;
+    }
     if (c->phone_tab == TS_TAB_RIDES && c->phone_sel < c->offer_count) ts_accept_row(c, c->phone_sel);
     else if (c->phone_tab == TS_TAB_BUS) ts_accept_row(c, TS_PHONE_OFFERS + c->phone_sel);
     else if (c->phone_tab == TS_TAB_ACCOUNT) ts_shift_toggle(c);
@@ -914,7 +1145,8 @@ int arrived_at(const TsCore *c, const float at[3]) {
     return d <= TS_ARRIVE_RADIUS || (c->gps_arrived && d <= TS_ARRIVE_RADIUS_GPS);
 }
 
-static void uber_complete(TsCore *c) {
+/* the passenger in c->job gets out: pay, rate, remember. 0.6: also the first of a shared ride (pool) halfway */
+static int uber_settle(TsCore *c, int *stars_out, int *base_out, int *bonus_out, int *late_out) {
     double took = c->t - c->leg_t;
     double late = took - c->job.limit_s;
     if (late <= 0.0) c->sat += 8.0f;
@@ -935,6 +1167,8 @@ static void uber_complete(TsCore *c) {
         c->met_stars[p] = (unsigned char)stars;
     }
     float rep = career_job_done(c, stars, pay, base, c->job.ptype >= TS_P_VIP, c->trip_driven_m, -1);
+    int streak_bonus = service_streak(c, stars, pay);
+    service_log(c, 0, c->job.passenger, c->job.dest, pay + streak_bonus, stars);
     finish_stats(c, stars);
 
     char title[TS_TEXT], text[TS_TEXT], km[24], time[16];
@@ -943,8 +1177,9 @@ static void uber_complete(TsCore *c) {
     snprintf(title, sizeof(title), "+%d € %s · %d/5 %s", pay, T(c, "Firmenkasse", "company"), stars, T(c, "Sterne", "stars"));
     snprintf(text, sizeof(text), "%s · %s · %s %d%%%s", km, time, T(c, "Zufrieden", "Satisfied"), (int)(c->sat + 0.5f),
              late > 0.0 ? T(c, " · zu spät", " · late") : T(c, " · pünktlich", " · on time"));
-    toast(c, TS_ICON_PAYOUT, TS_SOUND_NOTIFY, title, text);
-    if (pay != base) {
+    if (c->cards_on) sound(c, TS_SOUND_PAYOUT); /* 0.6: the card after the ride says it all */
+    else toast(c, TS_ICON_PAYOUT, TS_SOUND_PAYOUT, title, text);
+    if (pay != base && !c->cards_on) {
         snprintf(text, sizeof(text), "%s %+d € (%s)", T(c, "Bonus/Abzug:", "Bonus/deduction:"), pay - base,
                  pay > base ? T(c, "zufriedener Fahrgast", "happy passenger") : T(c, "unzufrieden", "unhappy"));
         event(c, TS_EV_FEED, 0, 0, "Horizon Transit", text);
@@ -954,13 +1189,112 @@ static void uber_complete(TsCore *c) {
         event(c, TS_EV_FEED, 0, 0, "Horizon Transit", text);
     }
     say(c, stars >= 4 ? 1 : stars >= 3 ? 0 : 2, stars >= 4 ? L_BYE_GOOD : stars >= 3 ? L_BYE_OK : L_BYE_BAD, 1);
+    service_streak_feed(c, streak_bonus);
+    *stars_out = stars, *base_out = base, *bonus_out = streak_bonus, *late_out = late > 0.0;
+    return pay;
+}
+
+static void uber_complete(TsCore *c) {
+    int stars, base, bonus, late;
+    int pay = uber_settle(c, &stars, &base, &bonus, &late);
+    card_ride(c, stars, pay, base, bonus, late);
+    int passenger = c->job.passenger, dest = c->job.dest;
     end_job(c);
+    service_maybe_lost(c, passenger, dest);
+    career_goal_check(c);
+    market_check_tier(c);
 }
 
 /* seconds standing at the pickup (boarding 1) or the destination: 3 / 2, longer while the door opens and closes (0.4.3) */
 double ts_uber_stop_s(const TsCore *c, int boarding) {
     double base = boarding ? 3.0 : 2.0, doors = ts_door_total_s(c);
     return doors > base ? doors : base;
+}
+
+/* ---- 0.6: a shared ride */
+
+/* the second passenger, saying something (the first is c->job.passenger until they get out) */
+static void pool_say_second(TsCore *c, int style, int kind) {
+    int keep = c->job.passenger;
+    c->job.passenger = c->job.pool_passenger;
+    say(c, style, kind, 1);
+    c->job.passenger = keep;
+}
+
+static void pool_second_in(TsCore *c) {
+    c->pool_stage = 1;
+    c->pool_board_t = c->t;
+    c->pool_driven_at = c->trip_driven_m;
+    set_nav(c, ts_places[c->job.dest].pos);
+    c->pool_leg_m = c->car_ok ? ts_distance_xz(c->car.pos, ts_places[c->job.dest].pos) : 1.0f;
+    char text[TS_TEXT];
+    snprintf(text, sizeof(text), "%s → %s", ts_passenger_name(c->job.pool_passenger), ts_place_name(c, c->job.pool_dest));
+    toast(c, TS_ICON_ROADS, TS_SOUND_NOTIFY, T(c, "Zweiter Fahrgast eingestiegen", "Second passenger in"), text);
+    pool_say_second(c, 0, L_POOL_HELLO);
+    c->pool_reply_at = c->t + 5.0;
+}
+
+static void pool_first_out(TsCore *c) {
+    float keep_sat = c->sat; /* the second's mood goes on from here (the first's on-time bonus is theirs) */
+    int stars, base, bonus, late;
+    int first = c->job.passenger;
+    c->pool_reply_at = 0.0;
+    int pay = uber_settle(c, &stars, &base, &bonus, &late);
+    c->pool_first = first;
+    c->pool_paid = pay + bonus;
+    c->pool_fare = pay < base ? pay : base;
+    c->pool_tip = pay > base ? pay - base : 0;
+    if (c->cards_on) { /* the card comes at the end, for both; now a line */
+        char text[TS_TEXT];
+        snprintf(text, sizeof(text), "%s %s · +%d € · %d/5", ts_passenger_name(first), T(c, "ist ausgestiegen", "got out"), pay + bonus, stars);
+        event(c, TS_EV_FEED, 0, 0, "Horizon Transit", text);
+    }
+    /* the ride goes on with the second */
+    c->sat = keep_sat;
+    c->pool_stage = 2;
+    c->job.passenger = c->job.pool_passenger;
+    c->job.ptype = c->job.pool_ptype;
+    c->job.pickup = c->job.pool_pickup;
+    c->job.dest = c->job.pool_dest;
+    c->job.trip_m = c->job.pool_trip_m;
+    c->job.max_kmh = type_max_kmh(c, c->job.ptype);
+    float to_go = c->car_ok ? ts_distance_xz(c->car.pos, ts_places[c->job.dest].pos) * TS_ROAD_FACTOR : c->job.pool_trip_m;
+    c->leg_t = c->pool_board_t;
+    c->job.limit_s = (float)(c->t - c->pool_board_t) + (to_go / TS_UBER_AVG_SPEED + 45.0f) * c->time_factor;
+    c->trip_driven_m -= c->pool_driven_at;
+    if (c->trip_driven_m < 0.0f) c->trip_driven_m = 0.0f;
+    c->late_noted = 0;
+    c->pool_leg_m = c->car_ok ? ts_distance_xz(c->car.pos, ts_places[c->job.dest].pos) : 1.0f;
+    wish_ride_start(c);
+    set_nav(c, ts_places[c->job.dest].pos);
+}
+
+/* stopping at the second's pickup (stage 0) or the first's destination (stage 1): they get in / out */
+static void pool_stop(TsCore *c) {
+    const float *at = ts_places[c->pool_stage == 0 ? c->job.pool_pickup : c->job.dest].pos;
+    if (!arrived_at(c, at)) {
+        if (c->pool_stop_t > 0.0) ts_door_abort(c);
+        c->pool_stop_t = 0.0;
+        return;
+    }
+    if (c->pool_stop_t > 0.0 && c->speed > TS_LEAVE_SPEED) { /* drove off too early */
+        ts_door_abort(c);
+        c->pool_stop_t = 0.0;
+        if (c->pool_stage == 1) say(c, 3, L_WANT_OUT, 1);
+        return;
+    }
+    if (c->pool_stop_t <= 0.0) {
+        if (c->speed >= TS_STOPPED_SPEED) return;
+        c->pool_stop_t = c->t;
+        c->door = -1; /* the other passenger's door */
+        ts_door_start(c);
+    }
+    ts_door_step(c);
+    if (c->t - c->pool_stop_t < ts_uber_stop_s(c, c->pool_stage == 0)) return;
+    ts_door_abort(c);
+    c->pool_stop_t = 0.0;
+    if (c->pool_stage == 0) pool_second_in(c);
+    else pool_first_out(c);
 }
 
 static void uber_step(TsCore *c) {
@@ -994,11 +1328,17 @@ static void uber_step(TsCore *c) {
             c->stage_t = c->leg_t = c->t;
             c->leg_m = c->trip_driven_m = 0.0f;
             c->calm_since = c->t;
-            set_nav(c, dest);
+            /* 0.6: a shared ride goes to the second passenger first */
+            const float *next = c->job.pool ? ts_places[c->job.pool_pickup].pos : dest;
+            set_nav(c, next);
+            c->pool_leg_m = c->car_ok ? ts_distance_xz(c->car.pos, next) : 1.0f;
             char text[TS_TEXT], km[24], time[16];
             format_km(c, km, sizeof(km), c->job.trip_m);
             format_time(time, sizeof(time), c->job.limit_s);
             snprintf(text, sizeof(text), "%s · ~%s · %s %s", ts_place_name(c, c->job.dest), km, T(c, "Limit", "limit"), time);
+            if (c->job.pool)
+                snprintf(text, sizeof(text), "%s %s: %s", T(c, "Erst", "First"), ts_passenger_name(c->job.pool_passenger),
+                         ts_place_name(c, c->job.pool_pickup));
             toast(c, TS_ICON_ROADS, TS_SOUND_NOTIFY, T(c, "Fahrgast eingestiegen", "Passenger picked up"), text);
             static const int greet[TS_P_KINDS] = {L_GREET_NORMAL, L_GREET_RELAXED, L_GREET_HURRY, L_GREET_FAN,
                                                   L_GREET_VIP, L_GREET_BUSINESS, L_GREET_WEDDING, L_GREET_TOURIST};
@@ -1029,6 +1369,10 @@ static void uber_step(TsCore *c) {
         break;
     case TS_UBER_TO_DEST:
         if (c->speed > 13.9f) c->slow_since = c->t; /* 50 km/h */
+        if (c->pool_reply_at > 0.0 && c->t >= c->pool_reply_at) { /* 0.6: the first answers the second's hello */
+            c->pool_reply_at = 0.0;
+            say(c, 0, L_POOL_REPLY, 1);
+        }
         if (c->talk_at > 0.0 && c->t >= c->talk_at && c->t >= c->chat_cooldown && c->wish == TS_WISH_NONE) {
             int type = c->job.ptype, p = c->job.passenger, g = c->car_group;
             int first = c->talk_at - c->leg_t < 10.0;
@@ -1052,6 +1396,7 @@ static void uber_step(TsCore *c) {
                                                      c->car_kind == TS_CAR_VAN) && random_unit(c) < 0.5f)
                     kind = c->car_kind == TS_CAR_VAN ? L_CAR_VAN : L_CAR_COMPLIMENT;
                 if (kind >= 0) say(c, kind == L_REG_LAST_BAD || kind == L_DISLIKES_CAR ? 3 : kind == L_LIKES_CAR ? 1 : 0, kind, 0);
+            } else if (talk_maybe_ask(c)) { /* 0.5.1: a question you may answer */
             } else if (type >= TS_P_VIP && random_unit(c) < 0.5f) {
                 say(c, 0, special_talk[type - TS_P_VIP], 0);
             } else if (!(type != TS_P_HURRY && random_unit(c) < 0.55f && tell(c))) {
@@ -1079,6 +1424,10 @@ static void uber_step(TsCore *c) {
             say(c, 3, L_LATE, 1);
             sound(c, TS_SOUND_ERROR);
         }
+        if (c->job.pool && c->pool_stage < 2) { /* 0.6: the second's pickup, then the first's destination */
+            pool_stop(c);
+            break;
+        }
         if (arrived_at(c, dest) && c->speed < TS_STOPPED_SPEED) {
             wish_arrived_at_dest(c);
             c->stage = TS_UBER_ALIGHTING;
@@ -1105,18 +1454,18 @@ static void uber_step(TsCore *c) {
 /* passengers at a stop: who gets out, who gets in (never more out than are on board, never more in than fit) */
 static void plan_stop(TsCore *c) {
     const TsLine *line = &ts_lines[c->line];
-    const TsPlace *stop = &ts_places[line->stops[c->stop_i]];
+    const TsPlace *stop = &ts_places[ts_bus_stop(c, c->line, c->stop_i)];
     int last = c->stop_i == (int)line->stop_count - 1;
     int out = 0;
     if (last) out = c->onboard;
     else if (c->onboard > 0) {
-        float p = stop->kind == TS_PLACE_SPOT ? 0.25f : 0.5f; /* each passenger gets out with this chance */
+        float p = stop->kind == TS_PLACE_SPOT ? 0.25f : stop->kind >= TS_PLACE_STOP ? 0.35f : 0.5f; /* each gets out with this chance */
         for (int i = 0; i < c->onboard; ++i)
             if (random_unit(c) < p) out++;
     }
     int in = 0;
     if (!last) {
-        int most = stop->kind == TS_PLACE_FESTIVAL ? 18 : stop->kind == TS_PLACE_OUTPOST ? 12 : 6;
+        int most = stop->kind == TS_PLACE_FESTIVAL ? 18 : stop->kind == TS_PLACE_OUTPOST ? 12 : stop->kind == TS_PLACE_STOP ? 9 : 6;
         int room = c->bus_capacity - (c->onboard - out);
         if (most > room) most = room;
         in = most > 0 ? random_below(c, most + 1) : 0;
@@ -1130,9 +1479,10 @@ static void plan_stop(TsCore *c) {
 
 static void bus_leg_to_next(TsCore *c) {
     const TsLine *line = &ts_lines[c->line];
-    int from = line->stops[c->stop_i];
+    int from = ts_bus_stop(c, c->line, c->stop_i);
     c->stop_i++;
-    int to = line->stops[c->stop_i];
+    int to = ts_bus_stop(c, c->line, c->stop_i);
+    int last = c->stop_i == (int)line->stop_count - 1;
     float est = place_distance(from, to) * TS_ROAD_FACTOR;
     c->stage = TS_BUS_TO_STOP;
     c->stage_t = c->leg_t = c->t;
@@ -1140,11 +1490,41 @@ static void bus_leg_to_next(TsCore *c) {
     c->late_noted = 0;
     c->deadline = c->t + (est / TS_BUS_AVG_SPEED + 45.0f) * c->time_factor;
     set_nav(c, ts_places[to].pos);
-    char text[TS_TEXT], km[24];
-    format_km(c, km, sizeof(km), est);
-    snprintf(text, sizeof(text), "%s · ~%s", ts_place_name(c, to), km);
-    toast(c, TS_ICON_ROADS, 0, T(c, "Nächste Haltestelle", "Next stop"), text);
+    /* 0.5: who gets off and on is known now: nobody = no stop request, the bus may drive through */
+    plan_stop(c);
+    c->stop_request = last || c->to_alight > 0 || c->to_board > 0;
+    /* the announcement, as on a real bus (read out with "Voices" on) */
+    char text[TS_TEXT];
+    if (last) snprintf(text, sizeof(text), "%s %s. %s", T(c, "Nächster Halt:", "Next stop:"), ts_place_name(c, to),
+                       T(c, "Endhaltestelle, bitte alle aussteigen.", "Last stop, all change please."));
+    else if (c->stop_request) snprintf(text, sizeof(text), "%s %s.", T(c, "Nächster Halt:", "Next stop:"), ts_place_name(c, to));
+    else snprintf(text, sizeof(text), "%s %s. %s", T(c, "Nächster Halt:", "Next stop:"), ts_place_name(c, to),
+                  T(c, "Kein Haltewunsch.", "No stop requested."));
+    sound(c, TS_SOUND_GONG); /* 0.5.1: the gong before the announcement */
+    event(c, TS_EV_FEED, 0, 0, T(c, "Ansage", "Announcement"), text);
+    if (c->event_count) c->events[c->event_count - 1].speaker = TS_SPEAKER_ANNOUNCE, c->events[c->event_count - 1].style = 3;
+    /* the stop button: someone presses it a little after the announcement (0.5.1: not on top of the gong) */
+    if (!last && c->to_alight > 0) c->bell_at = c->t + 2.5 + 3.0 * random_unit(c), c->bell_stop = c->stop_i;
+    else c->bell_at = 0.0;
     if (c->onboard > 0 && random_unit(c) < 0.35f) say(c, 0, L_BUS_TALK, 0);
+}
+
+/* 0.5: at a stop (or driving through one): the timetable and the fares; returns the delay */
+static float bus_reach_stop(TsCore *c) {
+    const TsLine *line = &ts_lines[c->line];
+    (void)line;
+    if (c->deadline > 0.0) {
+        double late = c->t - c->deadline;
+        if (late > 0.0) c->bus_late_s += (float)late;
+        else c->sat = clampf(c->sat + 2.0f, 0.0f, 100.0f);
+    }
+    float delay = tt_arrived(c);
+    /* fare: every passenger on board pays for the leg (4 € per estimated km) */
+    if (c->stop_i > 0) {
+        float leg_km = place_distance(ts_bus_stop(c, c->line, c->stop_i - 1), ts_bus_stop(c, c->line, c->stop_i)) * TS_ROAD_FACTOR / 1000.0f;
+        c->bus_pay += (int)((float)c->onboard * leg_km * 4.0f);
+    }
+    return delay;
 }
 
 static void bus_complete(TsCore *c) {
@@ -1158,6 +1538,8 @@ static void bus_complete(TsCore *c) {
     c->bus_lines_done++;
     c->passengers_total += c->delivered;
     career_job_done(c, stars, pay, base, 0, c->trip_driven_m, c->line);
+    int streak_bonus = service_streak(c, stars, pay);
+    service_log(c, 1, c->line, ts_bus_stop(c, c->line, (int)ts_lines[c->line].stop_count - 1), pay + streak_bonus, stars);
     finish_stats(c, stars);
     char title[TS_TEXT], text[TS_TEXT], km[24], time[16];
     format_km(c, km, sizeof(km), c->trip_driven_m);
@@ -1165,37 +1547,41 @@ static void bus_complete(TsCore *c) {
     snprintf(title, sizeof(title), "+%d € %s · %d/5 %s", pay, T(c, "Firmenkasse", "company"), stars, T(c, "Sterne", "stars"));
     snprintf(text, sizeof(text), "%s %s · %d %s · %s · %s", T(c, "Linie", "Line"), ts_lines[c->line].number, c->delivered,
              T(c, "Fahrgäste", "passengers"), km, time);
-    toast(c, TS_ICON_PAYOUT, TS_SOUND_NOTIFY, title, text);
+    if (c->cards_on) sound(c, TS_SOUND_PAYOUT);
+    else toast(c, TS_ICON_PAYOUT, TS_SOUND_PAYOUT, title, text);
     int timed = c->stops_on_time + c->stops_late;
-    if (timed) {
+    if (timed && !c->cards_on) {
         snprintf(text, sizeof(text), "%s %d %s %d %s", T(c, "Pünktlich an", "On time at"), c->stops_on_time, T(c, "von", "of"), timed,
                  T(c, "Halten", "stops"));
         event(c, TS_EV_FEED, 0, 0, T(c, "Fahrplan", "Timetable"), text);
     }
+    service_streak_feed(c, streak_bonus);
+    card_bus(c, stars, pay, base, streak_bonus);
     end_job(c);
+    career_goal_check(c);
+    market_check_tier(c);
 }
 
 static void bus_step(TsCore *c) {
     const TsLine *line = &ts_lines[c->line];
-    const TsPlace *stop = &ts_places[line->stops[c->stop_i]];
+    const TsPlace *stop = &ts_places[ts_bus_stop(c, c->line, c->stop_i)];
     if (c->stage == TS_BUS_TO_STOP) {
         if (c->deadline > 0.0 && !c->late_noted && c->t > c->deadline && c->onboard > 0) {
             c->late_noted = 1;
             say(c, 3, L_BUS_LATE, 1);
         }
+        /* 0.5: nobody wants off or on: drive through (or stop, as you like) */
+        if (!c->stop_request && arrived_at(c, stop->pos)) {
+            bus_reach_stop(c);
+            char text[TS_TEXT];
+            snprintf(text, sizeof(text), "%s %s", T(c, "Durchgefahren:", "Drove through:"), ts_place_name(c, ts_bus_stop(c, c->line, c->stop_i)));
+            event(c, TS_EV_FEED, 0, 0, T(c, "Leitstelle", "Dispatch"), text);
+            bus_leg_to_next(c);
+            return;
+        }
         if (arrived_at(c, stop->pos) && c->speed < TS_STOPPED_SPEED) {
-            if (c->deadline > 0.0) {
-                double late = c->t - c->deadline;
-                if (late > 0.0) c->bus_late_s += (float)late;
-                else c->sat = clampf(c->sat + 2.0f, 0.0f, 100.0f);
-            }
-            float delay = tt_arrived(c);
-            /* fare: every passenger on board pays for the leg (4 € per estimated km) */
-            if (c->stop_i > 0) {
-                float leg_km = place_distance(line->stops[c->stop_i - 1], line->stops[c->stop_i]) * TS_ROAD_FACTOR / 1000.0f;
-                c->bus_pay += (int)((float)c->onboard * leg_km * 4.0f);
-            }
-            plan_stop(c);
+            float delay = bus_reach_stop(c);
+            c->alighted_now = c->boarded_now = 0;
             c->stage = TS_BUS_AT_STOP;
             c->stage_t = c->t;
             char text[TS_TEXT];
@@ -1211,7 +1597,7 @@ static void bus_step(TsCore *c) {
                 format_time(late, sizeof(late), delay);
                 snprintf(text + used, sizeof(text) - used, " · +%s", late);
             }
-            toast(c, TS_ICON_NONE, TS_SOUND_NOTIFY, ts_place_name(c, line->stops[c->stop_i]), text);
+            toast(c, TS_ICON_NONE, TS_SOUND_NOTIFY, ts_place_name(c, ts_bus_stop(c, c->line, c->stop_i)), text);
         }
         return;
     }
@@ -1245,8 +1631,16 @@ static void bus_step(TsCore *c) {
 
 void ts_step(TsCore *c) {
     if (c->mode != TS_BUS) shop_apply(c); /* the bus's seats (not while a line runs) */
+    market_step(c);                       /* 0.6: hotspots come and go */
+    card_step(c);
     if (c->mode == TS_UBER) uber_step(c);
     else if (c->mode == TS_BUS) bus_step(c);
+    else service_idle_step(c);
+    talk_step(c);
+    if (c->bell_at > 0.0 && c->t >= c->bell_at) {
+        if (c->mode == TS_BUS && c->stage == TS_BUS_TO_STOP && c->stop_i == c->bell_stop) sound(c, TS_SOUND_BELL);
+        c->bell_at = 0.0;
+    }
 }
 
 int ts_take_events(TsCore *c, TsEvent *out, int max) {
@@ -1265,6 +1659,13 @@ void row(TsHud *h, const char *label, const char *value, int heading) {
     snprintf(h->row_value[h->row_count], sizeof(h->row_value[0]), "%s", value ? value : "");
     h->row_heading[h->row_count] = heading;
     h->row_count++;
+}
+
+void row_meter(TsHud *h, float full, int quality) {
+    if (h->row_count <= 0) return;
+    if (quality) h->row_meter_quality |= 1u << (h->row_count - 1);
+    h->row_meter_on |= 1u << (h->row_count - 1);
+    h->row_meter[h->row_count - 1] = full < 0.0f ? 0.0f : full > 1.0f ? 1.0f : full;
 }
 
 const char *type_name(const TsCore *c, int type) {
@@ -1290,6 +1691,10 @@ void ts_hud(const TsCore *c, TsHud *h) {
     memset(h, 0, sizeof(*h));
     h->row_selected = -1;
     h->german = c->german;
+    service_hud(c, h); /* 0.5: the meter and the tablet's column */
+    card_hud(c, h);    /* 0.6: a card after a ride, a shift, a new tier */
+    h->trip_class = -1;
+    h->trip_surge = 1.0f;
     char a[64], b[48], km[24], time[16];
 
     if (c->mode != TS_IDLE) {
@@ -1307,6 +1712,7 @@ void ts_hud(const TsCore *c, TsHud *h) {
         int carrying = (c->mode == TS_UBER && c->stage >= TS_UBER_TO_DEST) || (c->mode == TS_BUS && c->onboard > 0);
         if (carrying) {
             h->sign_limit = ts_speed_shown(c, max);
+            h->sign_free = c->mode == TS_UBER && c->floorit;
             /* 1 a little over (yellow), 2 clearly over (red): 10 km/h, in mph 6 mph over the sign (0.4.3: 15 km/h was rarely reached) */
             float red_kmh = c->imperial ? 6.0f * 1.609344f : 10.0f;
             h->sign_over = !over ? 0 : c->speed * 3.6f > (float)max + red_kmh ? 2 : 1;
@@ -1336,13 +1742,54 @@ void ts_hud(const TsCore *c, TsHud *h) {
                      T(c, "FG", "PAX"));
             if (c->deadline > 0.0) left = c->deadline - c->t, timed = 1;
         }
+        /* 0.5.1: the ride card: where to and how far along */
+        h->trip_on = 1;
+        if (c->mode == TS_UBER) {
+            int to_dest = c->stage >= TS_UBER_TO_DEST;
+            h->trip_class = c->job.ride_class;
+            h->trip_surge = c->job.surge > 1.0f ? c->job.surge : 1.0f;
+            snprintf(h->trip_label, sizeof(h->trip_label), "%s", c->stage == TS_UBER_TO_PICKUP ? T(c, "ABHOLEN", "PICK UP")
+                     : c->stage == TS_UBER_BOARDING ? T(c, "STEIGT EIN", "GETTING IN") : c->stage == TS_UBER_TO_DEST ? T(c, "ZUM ZIEL", "TO DESTINATION")
+                     : T(c, "STEIGT AUS", "GETTING OUT"));
+            snprintf(h->trip_to, sizeof(h->trip_to), "%s", ts_place_name(c, to_dest ? c->job.dest : c->job.pickup));
+            h->trip_pool = c->job.pool;
+            float p = 0.0f;
+            int pool_leg = c->job.pool && c->pool_stage < 2 && c->stage == TS_UBER_TO_DEST;
+            if (pool_leg) { /* 0.6: the second's pickup, then where the first gets out */
+                int at = c->pool_stage == 0 ? c->job.pool_pickup : c->job.dest;
+                if (c->pool_stage == 0)
+                    snprintf(h->trip_label, sizeof(h->trip_label), "%s", T(c, "2. FAHRGAST ABHOLEN", "PICK UP RIDER 2"));
+                else snprintf(h->trip_label, sizeof(h->trip_label), "%s %s", ts_passenger_name(c->job.passenger), T(c, "STEIGT AUS", "GETS OUT"));
+                if (c->pool_stage == 1) for (char *q = h->trip_label; *q; ++q) if (*q >= 'a' && *q <= 'z') *q = (char)(*q - 32);
+                snprintf(h->trip_to, sizeof(h->trip_to), "%s", ts_place_name(c, at));
+                if (c->car_ok && c->pool_leg_m > 1.0f) p = 1.0f - ts_distance_xz(c->car.pos, ts_places[at].pos) / c->pool_leg_m;
+            } else
+            if (c->stage == TS_UBER_TO_PICKUP && c->job.pickup_m > 1.0f && c->car_ok)
+                p = 1.0f - ts_distance_xz(c->car.pos, ts_places[c->job.pickup].pos) / c->job.pickup_m;
+            else if (c->stage == TS_UBER_TO_DEST && c->job.pool && c->pool_leg_m > 1.0f && c->car_ok) /* the second's last leg */
+                p = 1.0f - ts_distance_xz(c->car.pos, ts_places[c->job.dest].pos) / c->pool_leg_m;
+            else if (c->stage == TS_UBER_TO_DEST && c->job.trip_m > 1.0f && c->car_ok)
+                p = 1.0f - ts_distance_xz(c->car.pos, ts_places[c->job.dest].pos) * TS_ROAD_FACTOR / c->job.trip_m;
+            else if (c->stage == TS_UBER_BOARDING) p = 0.0f;
+            else if (c->stage > TS_UBER_TO_DEST) p = 1.0f;
+            h->trip_progress = roundf(clampf(p, 0.0f, 1.0f) * 50.0f) / 50.0f; /* 2 % steps: the card is redrawn only when it moves */
+        } else {
+            int n = (int)ts_lines[c->line].stop_count, i = c->stop_i < 0 ? 0 : c->stop_i >= n ? n - 1 : c->stop_i;
+            snprintf(h->trip_label, sizeof(h->trip_label), "%s %s · %s", T(c, "LINIE", "LINE"), ts_lines[c->line].number,
+                     c->stage == TS_BUS_AT_STOP ? T(c, "HALT", "STOP") : T(c, "NÄCHSTER HALT", "NEXT STOP"));
+            snprintf(h->trip_to, sizeof(h->trip_to), "%s", ts_place_name(c, ts_bus_stop(c, c->line, i)));
+            h->trip_progress = n > 1 ? (float)i / (float)(n - 1) : 0.0f;
+        }
         if (timed) {
             format_time(time, sizeof(time), left);
             snprintf(h->corner, sizeof(h->corner), "%s%s · %d%%", left < 0 ? "+" : "", time, (int)(c->sat + 0.5f));
         } else {
             snprintf(h->corner, sizeof(h->corner), "%d%%", (int)(c->sat + 0.5f));
         }
-        if (c->mode == TS_UBER) wish_chip(c, h->chip3, sizeof(h->chip3));
+        if (c->mode == TS_UBER) {
+            talk_chip(c, h->chip3, sizeof(h->chip3)); /* 0.5.1: a question waiting goes before the wish */
+            if (!h->chip3[0]) wish_chip(c, h->chip3, sizeof(h->chip3));
+        }
         else tt_chip(c, h->chip3, sizeof(h->chip3));
         int riding = (c->mode == TS_UBER && c->stage >= TS_UBER_TO_DEST) || (c->mode == TS_BUS && c->onboard > 0);
         h->stars = riding ? ts_stars(c->sat) : 0;
@@ -1373,6 +1820,7 @@ void ts_hud(const TsCore *c, TsHud *h) {
         h->tab = c->phone_tab;
         snprintf(h->tabs[TS_TAB_RIDES], sizeof(h->tabs[0]), "%s", T(c, "Fahrten", "Rides"));
         snprintf(h->tabs[TS_TAB_BUS], sizeof(h->tabs[0]), "%s", T(c, "Bus", "Bus"));
+        snprintf(h->tabs[TS_TAB_MAP], sizeof(h->tabs[0]), "%s", T(c, "Karte", "Map"));
         snprintf(h->tabs[TS_TAB_ACCOUNT], sizeof(h->tabs[0]), "%s", T(c, "Konto", "Account"));
         snprintf(h->tabs[TS_TAB_SHOP], sizeof(h->tabs[0]), "%s", T(c, "Shop", "Shop"));
         snprintf(h->tabs[TS_TAB_SETTINGS], sizeof(h->tabs[0]), "%s", T(c, "Optionen", "Options"));
@@ -1380,7 +1828,18 @@ void ts_hud(const TsCore *c, TsHud *h) {
         row(h, "Horizon Transit", h->tabs[c->phone_tab], 1);
         if (c->phone_tab == TS_TAB_RIDES) {
             car_line(c, a, sizeof(a));
+            int hot = market_hot_near(c);
             if (!c->car_ok || !c->offer_count) b[0] = 0;
+            else if (hot >= 0) { /* 0.6: where many want a ride: the nearest hotspot */
+                char sx[16];
+                market_surge_text(c, market_surge(c, c->hot[hot].place), sx, sizeof(sx));
+                const char *town = ts_place_name(c, c->hot[hot].place);
+                char name[32];
+                snprintf(name, sizeof(name), "%s", town);
+                char *cut = strstr(name, " · ");
+                if (cut) *cut = 0;
+                snprintf(b, sizeof(b), "%s %s", name, sx);
+            }
             else if (c->demand == 2) snprintf(b, sizeof(b), "%s", T(c, "Viel los", "Busy area"));
             else if (c->demand == 0) snprintf(b, sizeof(b), "%s", T(c, "Ruhige Gegend", "Quiet area"));
             else b[0] = 0;
@@ -1390,8 +1849,21 @@ void ts_hud(const TsCore *c, TsHud *h) {
                 format_km(c, km, sizeof(km), o->trip_m);
                 snprintf(b, sizeof(b), "%s · %d €", km, o->pay);
                 row(h, ts_place_name(c, o->dest), b, 0);
-                snprintf(a, sizeof(a), "%s · %s", ts_passenger_name(o->passenger), type_name(c, o->ptype));
-                snprintf(b, sizeof(b), "max %d %s", ts_speed_shown(c, o->max_kmh), ts_speed_unit(c));
+                char who[40];
+                if (o->party > 1) snprintf(who, sizeof(who), "%s +%d", ts_passenger_name(o->passenger), o->party - 1);
+                else snprintf(who, sizeof(who), "%s", ts_passenger_name(o->passenger));
+                if (o->pool) /* 0.6: a shared ride: both names */
+                    snprintf(a, sizeof(a), "%s · %s & %s", T(c, "Sammelfahrt", "Shared"), ts_passenger_name(o->passenger),
+                             ts_passenger_name(o->pool_passenger));
+                else if (o->ride_class != TS_CLASS_COMFORT) /* 0.6: the class first, then who */
+                    snprintf(a, sizeof(a), "%s · %s · %s", ts_class_name(o->ride_class, c->german), who,
+                             o->regular ? T(c, "fragt nach dir", "asked for you") : type_name(c, o->ptype));
+                else snprintf(a, sizeof(a), "%s · %s", who, o->regular ? T(c, "fragt nach dir", "asked for you") : type_name(c, o->ptype));
+                if (o->surge > 1.01f) {
+                    char sx[16];
+                    market_surge_text(c, o->surge, sx, sizeof(sx));
+                    snprintf(b, sizeof(b), "%s · max %d", sx, ts_speed_shown(c, o->max_kmh));
+                } else snprintf(b, sizeof(b), "max %d %s", ts_speed_shown(c, o->max_kmh), ts_speed_unit(c));
                 row(h, a, b, 2);
             }
             if (!c->offer_count) row(h, T(c, "Keine Anfragen", "No requests"), T(c, "erst losfahren", "drive first"), 2);
@@ -1403,6 +1875,10 @@ void ts_hud(const TsCore *c, TsHud *h) {
                 format_time(time, sizeof(time), o->limit_s);
                 snprintf(h->footer, sizeof(h->footer), "%s %s · %s %s · %s", T(c, "Abholung in", "Pickup"), pk,
                          T(c, "Zeitlimit", "time limit"), time, ts_place_name(c, o->pickup));
+                if (o->pool)
+                    snprintf(h->footer, sizeof(h->footer), "%s %s · %s %s %s · %s", T(c, "Abholung in", "Pickup"), pk,
+                             ts_passenger_name(o->pool_passenger), T(c, "steigt zu in", "joins at"), ts_place_name(c, o->pool_pickup),
+                             T(c, "2 x Fahrgeld", "2 fares"));
             }
         } else if (c->phone_tab == TS_TAB_BUS) {
             int locked = c->bus_needs_bus && c->car_kind != TS_CAR_BUS;
@@ -1418,15 +1894,20 @@ void ts_hud(const TsCore *c, TsHud *h) {
             if (locked)
                 snprintf(h->footer, sizeof(h->footer), "%s", T(c, "Steig in den Bus (PG Bus) um, dann geht's los.", "Get into the bus (PG Bus) to drive a line."));
             else
-                snprintf(h->footer, sizeof(h->footer), "%s: %s · %s %d min · max %d %s", T(c, "Start", "Start"),
-                         ts_places[l->stops[0]].name, T(c, "ca.", "about"), (int)(tt_line_minutes(c, sel < (int)ts_line_count ? sel : 0) + 0.5f),
-                         ts_speed_shown(c, TS_BUS_MAX_KMH), ts_speed_unit(c));
+            {
+                int li = sel < (int)ts_line_count ? sel : 0, n = (int)l->stop_count, rev = bus_direction(c, li);
+                snprintf(h->footer, sizeof(h->footer), "%s → %s · %s %d min · max %d %s",
+                         ts_place_name(c, l->stops[rev ? n - 1 : 0]), ts_place_name(c, l->stops[rev ? 0 : n - 1]), T(c, "ca.", "about"),
+                         (int)(tt_line_minutes(c, li) + 0.5f), ts_speed_shown(c, TS_BUS_MAX_KMH), ts_speed_unit(c));
+            }
         } else if (c->phone_tab == TS_TAB_SETTINGS) {
             for (int i = 0; i < c->setting_count && i < TS_SETTING_ROWS; ++i) row(h, c->setting_label[i], c->setting_value[i], 0);
             if (!c->setting_count) row(h, T(c, "Keine Einstellungen", "No settings"), "", 2);
             else h->row_selected = 1 + sel;
             snprintf(h->footer, sizeof(h->footer), "%s", T(c, "Enter ändert die Einstellung. Gespeichert wie im Mod-Menü.",
                                                           "Enter changes the setting. Saved like in the mod menu."));
+        } else if (c->phone_tab == TS_TAB_MAP) {
+            /* 0.7: map_hud fills it */
         } else if (c->phone_tab == TS_TAB_SHOP) {
             snprintf(b, sizeof(b), "%lld €", c->wallet);
             row(h, T(c, "Firmenkasse", "Company funds"), b, 2);
@@ -1437,23 +1918,38 @@ void ts_hud(const TsCore *c, TsHud *h) {
             h->row_selected = 1; /* the shift */
         }
     } else {
-        h->tab_count = 1;
+        h->tab_count = 2; /* 0.7: the job, its map */
+        h->tab = c->job_tab;
         snprintf(h->tabs[0], sizeof(h->tabs[0]), "%s", T(c, "Auftrag", "Job"));
-        row(h, "Horizon Transit", h->tabs[0], 1);
+        snprintf(h->tabs[1], sizeof(h->tabs[0]), "%s", T(c, "Karte", "Map"));
+        row(h, "Horizon Transit", h->tabs[c->job_tab], 1);
         if (c->mode == TS_UBER) {
             const TsPerson *who = &ts_people[c->job.passenger % PASSENGER_COUNT];
             snprintf(a, sizeof(a), "%s, %d · %s · %s", who->name, who->age, c->german ? who->job_de : who->job_en, type_name(c, c->job.ptype));
             row(h, a, NULL, 2);
+            if (c->job.pool && c->pool_stage < 2) { /* 0.6: the second passenger instead of the pickup */
+                snprintf(b, sizeof(b), "%s · %s", ts_passenger_name(c->job.pool_passenger),
+                         c->pool_stage == 0 ? ts_place_name(c, c->job.pool_pickup) : T(c, "im Auto", "in the car"));
+                row(h, T(c, "Mitfahrer", "Co-rider"), b, 0);
+            } else
             row(h, T(c, "Abholort", "Pickup"), ts_place_name(c, c->job.pickup), 0);
+            /* 0.5.1: how far along: to the pickup, then to the destination */
+            if (c->stage == TS_UBER_TO_PICKUP && c->job.pickup_m > 1.0f && c->car_ok)
+                row_meter(h, 1.0f - ts_distance_xz(c->car.pos, ts_places[c->job.pickup].pos) / c->job.pickup_m, 0);
+            else if (c->stage > TS_UBER_TO_PICKUP) row_meter(h, 1.0f, 0);
             row(h, T(c, "Ziel", "Destination"), ts_place_name(c, c->job.dest), 0);
+            if (c->stage == TS_UBER_TO_DEST && c->job.trip_m > 1.0f && c->car_ok)
+                row_meter(h, 1.0f - ts_distance_xz(c->car.pos, ts_places[c->job.dest].pos) * TS_ROAD_FACTOR / c->job.trip_m, 0);
+            else if (c->stage > TS_UBER_TO_DEST) row_meter(h, 1.0f, 0);
             snprintf(b, sizeof(b), "%d €", c->job.pay);
             row(h, T(c, "Bezahlung (erwartet)", "Pay (expected)"), b, 0);
         } else {
             const TsLine *l = &ts_lines[c->line];
             snprintf(a, sizeof(a), "%s %s · %s", T(c, "Linie", "Line"), l->number, ts_line_title(c, c->line));
             row(h, a, NULL, 2);
-            snprintf(b, sizeof(b), "%d / %u · %s", c->stop_i + 1, l->stop_count, ts_places[l->stops[c->stop_i]].name);
+            snprintf(b, sizeof(b), "%d / %u · %s", c->stop_i + 1, l->stop_count, ts_places[ts_bus_stop(c, c->line, c->stop_i)].name);
             row(h, T(c, "Haltestelle", "Stop"), b, 0);
+            row_meter(h, (float)c->stop_i / (float)(l->stop_count > 1 ? l->stop_count - 1 : 1), 0); /* 0.5.1: the line so far */
             snprintf(b, sizeof(b), "%d / %d · %d €", c->onboard, c->bus_capacity, c->bus_pay);
             row(h, T(c, "Fahrgäste", "Passengers"), b, 0);
             if (c->plan_started && c->stop_i > 0) snprintf(b, sizeof(b), "%d / %d %s", c->stops_on_time, c->stops_on_time + c->stops_late,
@@ -1465,8 +1961,11 @@ void ts_hud(const TsCore *c, TsHud *h) {
         row(h, T(c, "Tempo höchstens", "Speed at most"), b, 0);
         snprintf(b, sizeof(b), "%d%% (%d/5)", (int)(c->sat + 0.5f), ts_stars(c->sat));
         row(h, T(c, "Zufriedenheit", "Satisfaction"), b, 0);
+        row_meter(h, c->sat / 100.0f, 1);
         row(h, c->cancel_armed ? T(c, "Wirklich abbrechen?", "Really cancel?") : T(c, "Auftrag abbrechen", "Cancel job"),
             c->cancel_armed ? T(c, "nochmal drücken", "press again") : "", 0);
         h->row_selected = h->row_count - 1;
+        h->map_keys = TS_MAPKEYS_JOBPAGE;
     }
+    map_hud(c, h); /* 0.7: the map tab, the preview, the job's map */
 }

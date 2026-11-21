@@ -52,6 +52,14 @@ msgctxt "row.Voices.choice.3"
 msgid "Loud"
 msgstr "Laut"
 
+msgctxt "row.MapPreview.label"
+msgid "Map preview before accepting"
+msgstr "Karten-Vorschau vor dem Annehmen"
+
+msgctxt "row.MapPreview.description"
+msgid "On: Enter on a ride or a bus line first shows it on the phone's map (where you are, the pickup, the destination, all stops); Enter again takes it, Backspace goes back. Off: Enter takes it at once. The map itself: the Map tab."
+msgstr "An: Enter auf einer Fahrt oder Buslinie zeigt sie zuerst auf der Karte im Handy (wo du bist, Abholort, Ziel, alle Haltestellen); nochmal Enter nimmt sie an, Rücktaste geht zurück. Aus: Enter nimmt sie sofort an. Die Karte selbst: der Tab Karte."
+
 msgctxt "row.RidePanel.label"
 msgid "Ride panel by the speedometer"
 msgstr "Fahrt-Anzeige am Tacho"
@@ -124,6 +132,18 @@ msgctxt "row.PhoneStyle.description"
 msgid "How the phone looks."
 msgstr "Wie das Handy aussieht."
 
+msgctxt "row.Device.choice.0"
+msgid "Phone"
+msgstr "Handy"
+
+msgctxt "row.Device.label"
+msgid "Device"
+msgstr "Gerät"
+
+msgctxt "row.Device.description"
+msgid "What the app runs on. Phone: as before. Edge: slim, with a punch-hole camera and Android keys. Tablet: landscape and bigger, with the passenger, the line's stops and the logbook next to the list."
+msgstr "Worauf die App läuft. Handy: wie bisher. Edge: schmal, mit Kamera-Loch und Android-Tasten. Tablet: quer und größer, mit Fahrgast, Haltestellen der Linie und Fahrtenbuch neben der Liste."
+
 msgctxt "row.BusInAutoshow.label"
 msgid "Bus in the Autoshow"
 msgstr "Bus im Autohaus"
@@ -144,6 +164,10 @@ msgctxt "hotkey.Accept.label"
 msgid "Accept / cancel"
 msgstr "Annehmen / Abbrechen"
 
+msgctxt "hotkey.Reply.label"
+msgid "Answer a passenger (controller)"
+msgstr "Fahrgast antworten (Controller)"
+
 msgctxt "page.App.label"
 msgid "Horizon Transit (jobs)"
 msgstr "Horizon Transit (Aufträge)"
@@ -163,3 +187,47 @@ msgstr "Fahrgast-Türen"
 msgctxt "row.PassengerDoors.description"
 msgid "When a passenger gets in or out, a door opens and closes with its sound: rear left, rear right or the front passenger door. Cars without a door animation only play the sound."
 msgstr "Wenn ein Fahrgast ein- oder aussteigt, geht eine Tür mit Geräusch auf und wieder zu: hinten links, hinten rechts oder vorne beim Beifahrer. Autos ohne Tür-Animation spielen nur das Geräusch."
+
+msgctxt "row.SpeedWarning.label"
+msgid "Speed warning tones"
+msgstr "Warnton bei zu schnell"
+
+msgctxt "row.SpeedWarning.description"
+msgid "With a passenger on board: a soft tone once when the speed sign turns yellow, a repeating chime while it is red."
+msgstr "Mit Fahrgast an Bord: ein leiser Ton, wenn das Tempo-Schild gelb wird, und ein Dauer-Gong, solange es rot ist."
+
+msgctxt "row.Sounds.label"
+msgid "Mod sounds"
+msgstr "Mod-Geräusche"
+
+msgctxt "row.Sounds.description"
+msgid "The mod's own sounds: speed warning, bus gong and stop bell, ride requests, payouts. Off: the game's menu sounds instead. Door sounds: [Doors] Volume in TransportSim.ini."
+msgstr "Die eigenen Geräusche der Mod: Tempo-Warnung, Bus-Gong und Haltewunsch-Glocke, Fahrtanfragen, Bezahlung. Aus: stattdessen die Menü-Geräusche des Spiels. Türgeräusche: [Doors] Volume in TransportSim.ini."
+
+msgctxt "row.Sounds.choice.0"
+msgid "Off"
+msgstr "Aus"
+
+msgctxt "row.Sounds.choice.1"
+msgid "Quiet"
+msgstr "Leise"
+
+msgctxt "row.Sounds.choice.2"
+msgid "Normal"
+msgstr "Normal"
+
+msgctxt "row.Sounds.choice.3"
+msgid "Loud"
+msgstr "Laut"
+
+msgctxt "row.Replies.label"
+msgid "Answer passengers"
+msgstr "Fahrgästen antworten"
+
+msgctxt "row.Replies.description"
+msgid "Passengers sometimes ask you something. Press B on the keyboard or LB+RB+D-pad down on the controller to answer (change it under Pause > MODS or [Keys] ReplyKey / ReplyPad in TransportSim.ini), or stay quiet. With Voices on, your driver speaks in his own voice."
+msgstr "Fahrgäste fragen dich manchmal etwas. Antworten mit B auf der Tastatur oder LB+RB+Steuerkreuz runter am Controller (änderbar unter Pause > MODS oder [Keys] ReplyKey / ReplyPad in TransportSim.ini), oder du schweigst einfach. Mit „Stimmen“ an spricht dein Fahrer mit seiner eigenen Stimme."
+
+msgctxt "row.PhoneStyle.choice.7"
+msgid "Pure"
+msgstr "Pur"

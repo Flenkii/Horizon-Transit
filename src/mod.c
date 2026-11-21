@@ -31,13 +31,16 @@
 #include "core/jobs.h"
 #include "core/stops.h"
 #include "core/bus_sql.h"
+#include "core/map.h"
+#include "core/gamemap.h"
 #include "phone_window.h"
 #include "voice.h"
 #include "phone_draw.h"
-#include "door_sounds.h" /* the door sounds, built in by build.py from sounds/ */
+#include <mmsystem.h>
+#include "sounds.h" /* the sounds, built in by build.py from sounds/ */
 
 #define MOD_NAME "Horizon Transit"
-#define MOD_VERSION "0.4.3"
+#define MOD_VERSION "0.9.1"
 #define MOD_FOLDER L"TransportSim"
 
 /* ------------------------------------------------------------------ game addresses (checked below) */
@@ -105,6 +108,7 @@ static int opt_nav = 1, opt_bus_autoshow = 0, opt_time_limit = 1; /* 0 relaxed, 
 static int opt_language = 0;                                        /* 0 the game's, 1 Deutsch, 2 English */
 static const int opt_arrow_keys = 1; /* the phone always takes the arrow keys, Enter and Backspace while it's open (0.4.1: no switch any more) */
 static int opt_bus_needs_bus = 1; /* bus lines only in the game's bus */
+static int opt_map_preview = 1; /* 0.7: Enter on a ride or a line shows it on the map first */
 static int opt_dash = 1, opt_dash_right = 410, opt_dash_bottom = 110; /* 0.4.2: the ride panel by the speedometer */
 static int opt_voices = 0;        /* 0.4.1: passengers read out by Windows speech: 0 off, 1 quiet, 2 normal, 3 loud */
 static int opt_complaints = 1;    /* 0.4.1: passengers remark on the driving */
@@ -113,8 +117,17 @@ static int opt_doors = 1;         /* 0.4.3: the mod-menu switch "Passenger doors
 static int opt_door_anim = 1;     /* [Doors] Animate: 0 = only the sounds */
 static int opt_door_shut_ms = 600; /* [Doors] ShutDelayMs: close -> the close sound */
 static int opt_door_volume = 80;  /* [Doors] Volume 0..100 (our sound files) */
+static int opt_sounds = 2;        /* 0.5.1: the mod's own sounds: 0 off (the game's UI sounds instead), 1 quiet, 2 normal, 3 loud */
+static int opt_speed_warn = 1;    /* 0.5.1: the speed warning's tones */
+static int opt_replies = 1;       /* 0.5.1: answer passengers' questions with a key; 0.8 also with the controller */
+static uint32_t reply_pad = FH2_PAD_LB | FH2_PAD_RB | FH2_PAD_DPAD_DOWN; /* 0.8: [Keys] ReplyPad, the controller chord */
+static volatile LONGLONG pad_reply_ms;      /* 0.8: when the controller chord was last used (GetTickCount64) */
+static int opt_reply_vk = 'B';    /* [Keys] ReplyKey: free on Marvin's PC (checked against all his mods' keys, 2026-11-20) */
+static volatile LONG want_reply;
+static volatile LONGLONG keyboard_drive_ms; /* when the keyboard's driving keys were last pressed (GetTickCount64) */
 static char learned_sides[2048];  /* [Doors] Learned: "MEDIA=L,MEDIA=R," (see "which side the wheel is on") */
 static char opt_rhd[1024];        /* [Doors] RightHandDrive: media names of cars with the wheel on the right, comma separated */
+static int opt_device = 0;        /* 0.5: 0 the phone, 1 the Edge phone, 2 the tablet */
 static int opt_phone_style = 0;   /* 0 Night, 1 Light, 2 Festival (the phone window; the HUD list only when it can't be made) */
 static uint32_t key_vk[3] = {VK_F9, VK_F10, VK_F11}, key_mod[3], key_pad[3] = {
     FH2_PAD_LB | FH2_PAD_RB | FH2_PAD_DPAD_UP, FH2_PAD_LB | FH2_PAD_RB | FH2_PAD_DPAD_RIGHT, FH2_PAD_LB | FH2_PAD_RB | FH2_PAD_A};
@@ -122,6 +135,7 @@ static const char *const key_names[3] = {"Phone", "Next", "Accept"};
 
 /* asked by keys / the page, done by the worker under the lock */
 static volatile LONG want_tab; /* -1 / +1 */
+static volatile LONG want_back; /* 0.7: Backspace: the map's preview first, then the phone */
 static volatile LONG want_toggle, want_next, want_prev, want_accept, want_row = -1, want_cancel;
 static volatile LONG phone_is_open; /* copied from the core by the worker */
 
@@ -189,6 +203,7 @@ static void load_settings(void) {
     opt_extras = ini_int("Settings", "CareerExtras", 1) != 0;
     opt_complaints = ini_int("Settings", "Complaints", 1) != 0;
     opt_dash = ini_int("Settings", "RidePanel", 1) != 0;
+    opt_map_preview = ini_int("Settings", "MapPreview", 1) != 0;
     opt_dash_right = ini_int("Settings", "RidePanelRight", 410);
     if (opt_dash_right == 300) opt_dash_right = 410; /* the first guess sat on the speedometer */
     opt_dash_bottom = ini_int("Settings", "RidePanelBottom", 110);
@@ -196,6 +211,13 @@ static void load_settings(void) {
     opt_voices = ini_int("Settings", "Voices", 0);
     if (opt_voices < 0 || opt_voices > 3) opt_voices = 0;
     opt_doors = ini_int("Settings", "PassengerDoors", 1) != 0;
+    opt_sounds = ini_int("Settings", "Sounds", 2);
+    if (opt_sounds < 0 || opt_sounds > 3) opt_sounds = 2;
+    opt_speed_warn = ini_int("Settings", "SpeedWarning", 1) != 0;
+    opt_replies = ini_int("Settings", "Replies", 1) != 0;
+    opt_reply_vk = ini_int("Keys", "ReplyKey", 'B');
+    reply_pad = (uint32_t)ini_int("Keys", "ReplyPad", (int)reply_pad);
+    if (opt_reply_vk <= 0 || opt_reply_vk > 254) opt_reply_vk = 'B';
     opt_door_anim = ini_int("Doors", "Animate", 1) != 0;
     opt_door_shut_ms = ini_int("Doors", "ShutDelayMs", 600);
     if (opt_door_shut_ms < 100 || opt_door_shut_ms > 2500) opt_door_shut_ms = 600;
@@ -211,6 +233,8 @@ static void load_settings(void) {
     }
     opt_time_limit = ini_int("Settings", "TimeLimit", 1);
     if (opt_time_limit < 0 || opt_time_limit > 2) opt_time_limit = 1;
+    opt_device = ini_int("Settings", "Device", 0);
+    if (opt_device < 0 || opt_device >= TS_DEVICES) opt_device = 0;
     opt_phone_style = ini_int("Settings", "PhoneStyle", 0);
     if (opt_phone_style < 0 || opt_phone_style >= TS_THEMES) opt_phone_style = 0;
     opt_language = ini_int("Settings", "Language", 0);
@@ -234,6 +258,11 @@ static void save_settings(void) {
     ini_put_int("Settings", "Complaints", opt_complaints);
     ini_put_int("Settings", "Voices", opt_voices);
     ini_put_int("Settings", "PassengerDoors", opt_doors);
+    ini_put_int("Settings", "Sounds", opt_sounds);
+    ini_put_int("Settings", "SpeedWarning", opt_speed_warn);
+    ini_put_int("Settings", "Replies", opt_replies);
+    ini_put_int("Keys", "ReplyKey", opt_reply_vk);
+    ini_put_int("Keys", "ReplyPad", (int)reply_pad);
     ini_put_int("Doors", "Animate", opt_door_anim);
     ini_put_int("Doors", "ShutDelayMs", opt_door_shut_ms);
     ini_put_int("Doors", "Volume", opt_door_volume);
@@ -246,11 +275,13 @@ static void save_settings(void) {
         WritePrivateProfileStringW(L"Doors", L"Learned", learned, ini_path);
     }
     ini_put_int("Settings", "RidePanel", opt_dash);
+    ini_put_int("Settings", "MapPreview", opt_map_preview);
     ini_put_int("Settings", "RidePanelRight", opt_dash_right);
     ini_put_int("Settings", "RidePanelBottom", opt_dash_bottom);
     ini_put_int("Settings", "TimeLimit", opt_time_limit);
     ini_put_int("Settings", "Language", opt_language);
     ini_put_int("Settings", "PhoneStyle", opt_phone_style);
+    ini_put_int("Settings", "Device", opt_device);
     for (int i = 0; i < 3; ++i) {
         char k[32];
         snprintf(k, sizeof(k), "%sKey", key_names[i]);
@@ -309,6 +340,10 @@ static void load_stats(void) {
         core.met_car[i] = (unsigned short)(car <= ts_car_count ? car : 0);
         core.met_stars[i] = (unsigned char)(stars <= 5 ? stars : 0);
     }
+    /* 0.6: the driver's tier (never lower than the numbers reach) */
+    core.tier = ini_int("Career", "Tier", 0);
+    if (core.tier < 0 || core.tier >= TS_TIERS) core.tier = 0;
+    if (ts_tier_for(&core) > core.tier) core.tier = ts_tier_for(&core);
 }
 
 static void save_stats(const TsCore *c) {
@@ -342,6 +377,7 @@ static void save_stats(const TsCore *c) {
     char mem[5 * TS_PEOPLE_MAX + 1];
     for (int i = 0; i < TS_PEOPLE_MAX; ++i) snprintf(mem + 5 * i, 6, "%04x%x", c->met_car[i], c->met_stars[i] & 15);
     ini_put("Career", "Memory", mem);
+    ini_put_int("Career", "Tier", c->tier); /* 0.6 */
 }
 
 static float time_factor(void) {
@@ -683,15 +719,45 @@ static void door_queue_step(int step, int door) {
     ReleaseSRWLockExclusive(&door_lock);
 }
 
-/* the sounds: built into the DLL (sounds/door_open.wav, door_close.wav); own WAV files in <Azimuth>\TransportSim\sounds\ replace them
-   (16-bit PCM WAV; any other WAV plays at its own volume) */
+/* ------------------------------------------------------------------ the sounds (0.4.3 doors, 0.5.1 all of them)
+
+   All built into the DLL (sounds.h, made by build.py from sounds/): the doors, the speed warning's tones, the bus's
+   gong and stop bell, the ride request and the payout. An own WAV with the same name in <Azimuth>\TransportSim\sounds\
+   replaces one (16-bit PCM; any other WAV plays at its own volume).
+   They play through winmm's waveOut, a few at once (PlaySound only plays one: a door would cut the warning off);
+   PlaySound is the fallback if waveOut can't be opened. Slot 0 is the speed warning's (it can be cut when red ends). */
 typedef BOOL(WINAPI *PlaySoundWFn)(LPCWSTR, HMODULE, DWORD);
+typedef MMRESULT(WINAPI *WaveOutOpenFn)(LPHWAVEOUT, UINT, LPCWAVEFORMATEX, DWORD_PTR, DWORD_PTR, DWORD);
+typedef MMRESULT(WINAPI *WaveOutHdrFn)(HWAVEOUT, LPWAVEHDR, UINT);
+typedef MMRESULT(WINAPI *WaveOutFn)(HWAVEOUT);
 #define TS_SND_ASYNC 0x0001u     /* mmsystem.h: SND_ASYNC, SND_NODEFAULT, SND_MEMORY */
 #define TS_SND_NODEFAULT 0x0002u
 #define TS_SND_MEMORY 0x0004u
 static PlaySoundWFn play_sound;
-static unsigned char *door_wav[2];
+static WaveOutOpenFn wo_open;
+static WaveOutHdrFn wo_prepare, wo_unprepare, wo_write;
+static WaveOutFn wo_reset, wo_close;
 static wchar_t sound_folder[MAX_PATH];
+static SRWLOCK sfx_lock = SRWLOCK_INIT;
+
+typedef struct {
+    unsigned char *wav;  /* the whole file, at its volume */
+    WAVEFORMATEX fmt;
+    const char *pcm;     /* its "data" chunk */
+    DWORD bytes;
+} Sfx;
+static Sfx sfx[SFX_COUNT];
+
+#define SFX_SLOTS 6
+#define SFX_SLOT_WARN 0
+typedef struct {
+    HWAVEOUT h;
+    WAVEFORMATEX fmt;
+    WAVEHDR hdr;
+    int busy;
+} SfxSlot;
+static SfxSlot sfx_slot[SFX_SLOTS];
+static int sfx_next = 1;
 
 /* a copy of a WAV at the volume (16-bit PCM samples in its "data" chunk scaled), or NULL if it isn't a WAV */
 static unsigned char *wav_copy(const unsigned char *src, DWORD size, int volume) {
@@ -715,8 +781,8 @@ static unsigned char *wav_copy(const unsigned char *src, DWORD size, int volume)
     return data;
 }
 
-/* an own sound file instead of the built-in one (TransportSim\sounds\door_open.wav / door_close.wav), if there is one */
-static unsigned char *load_wav(const wchar_t *path, int volume) {
+/* an own sound file instead of the built-in one (TransportSim\sounds\<name>.wav), if there is one */
+static unsigned char *load_wav(const wchar_t *path, int volume, DWORD *out_size) {
     HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (file == INVALID_HANDLE_VALUE) return NULL;
     DWORD size = GetFileSize(file, NULL), read = 0;
@@ -724,29 +790,141 @@ static unsigned char *load_wav(const wchar_t *path, int volume) {
     if (raw && ReadFile(file, raw, size, &read, NULL) && read == size) data = wav_copy(raw, size, volume);
     free(raw);
     CloseHandle(file);
+    if (data) *out_size = size;
     return data;
 }
 
-static void doors_load_sounds(void) {
+/* the format and the samples of a loaded WAV (for waveOut); 0 if it has none */
+static int sfx_parse(Sfx *x, DWORD size) {
+    x->pcm = NULL, x->bytes = 0;
+    memset(&x->fmt, 0, sizeof(x->fmt));
+    int have_fmt = 0;
+    for (DWORD at = 12; x->wav && at + 8 <= size;) {
+        DWORD len = *(DWORD *)(x->wav + at + 4);
+        if (!memcmp(x->wav + at, "fmt ", 4) && len >= 16 && at + 8 + 16 <= size) {
+            memcpy(&x->fmt, x->wav + at + 8, 16);
+            x->fmt.cbSize = 0;
+            have_fmt = x->fmt.wFormatTag == WAVE_FORMAT_PCM;
+        } else if (!memcmp(x->wav + at, "data", 4) && have_fmt) {
+            x->pcm = (const char *)x->wav + at + 8;
+            x->bytes = len < size - at - 8 ? len : size - at - 8;
+            return 1;
+        }
+        at += 8 + len + (len & 1);
+    }
+    return 0;
+}
+
+static void slot_stop(SfxSlot *s) {
+    if (s->h && s->busy) {
+        wo_reset(s->h);
+        wo_unprepare(s->h, &s->hdr, sizeof(WAVEHDR));
+    }
+    s->busy = 0;
+}
+
+/* the volume of a sound in percent: the doors have their own ([Doors] Volume), the rest follows "Sounds" */
+static int sfx_volume(int id) {
+    static const int levels[4] = {0, 45, 75, 100};
+    if (id == SFX_DOOR_OPEN || id == SFX_DOOR_CLOSE) return opt_door_volume;
+    return levels[opt_sounds < 0 || opt_sounds > 3 ? 2 : opt_sounds];
+}
+
+/* (re)loads every sound at its volume; called at the start and when "Sounds" changes */
+static void sounds_load(void) {
     if (!play_sound) {
         HMODULE winmm = LoadLibraryW(L"winmm.dll");
-        play_sound = winmm ? (PlaySoundWFn)(void *)GetProcAddress(winmm, "PlaySoundW") : NULL;
+        if (winmm) {
+            play_sound = (PlaySoundWFn)(void *)GetProcAddress(winmm, "PlaySoundW");
+            wo_open = (WaveOutOpenFn)(void *)GetProcAddress(winmm, "waveOutOpen");
+            wo_prepare = (WaveOutHdrFn)(void *)GetProcAddress(winmm, "waveOutPrepareHeader");
+            wo_unprepare = (WaveOutHdrFn)(void *)GetProcAddress(winmm, "waveOutUnprepareHeader");
+            wo_write = (WaveOutHdrFn)(void *)GetProcAddress(winmm, "waveOutWrite");
+            wo_reset = (WaveOutFn)(void *)GetProcAddress(winmm, "waveOutReset");
+            wo_close = (WaveOutFn)(void *)GetProcAddress(winmm, "waveOutClose");
+            if (!wo_open || !wo_prepare || !wo_unprepare || !wo_write || !wo_reset || !wo_close) wo_open = NULL;
+        }
     }
-    static const wchar_t *const files[2] = {L"door_open.wav", L"door_close.wav"};
-    static const unsigned char *const built_in[2] = {ts_door_open_wav, ts_door_close_wav};
-    static const DWORD built_in_size[2] = {sizeof(ts_door_open_wav), sizeof(ts_door_close_wav)};
-    for (int i = 0; i < 2; ++i) {
+    AcquireSRWLockExclusive(&sfx_lock);
+    if (play_sound) play_sound(NULL, NULL, 0); /* the fallback may still play an old copy */
+    for (int k = 0; k < SFX_SLOTS; ++k) slot_stop(&sfx_slot[k]); /* nothing may play from a buffer about to be freed */
+    for (int i = 0; i < SFX_COUNT; ++i) {
         wchar_t path[MAX_PATH];
-        free(door_wav[i]);
-        door_wav[i] = NULL;
-        if (sound_folder[0] && _snwprintf(path, MAX_PATH, L"%ls\\%ls", sound_folder, files[i]) > 0) door_wav[i] = load_wav(path, opt_door_volume);
-        if (door_wav[i]) log_line("doors: own sound %ls", path);
-        else door_wav[i] = wav_copy(built_in[i], built_in_size[i], opt_door_volume);
+        DWORD size = 0;
+        Sfx *x = &sfx[i];
+        free(x->wav);
+        x->wav = NULL;
+        int volume = sfx_volume(i);
+        if (sound_folder[0] && _snwprintf(path, MAX_PATH, L"%ls\\%ls", sound_folder, ts_sounds[i].file) > 0)
+            x->wav = load_wav(path, volume, &size);
+        if (x->wav) log_line("sounds: own file %ls", path);
+        else x->wav = wav_copy(ts_sounds[i].data, ts_sounds[i].size, volume), size = ts_sounds[i].size;
+        sfx_parse(x, size);
     }
+    ReleaseSRWLockExclusive(&sfx_lock);
+}
+
+/* plays a sound; slot SFX_SLOT_WARN for the speed warning, -1 any free one. Returns 0 if it can't. */
+static int sfx_play(int id, int slot) {
+    static int logged_fallback;
+    int ok = 0;
+    AcquireSRWLockExclusive(&sfx_lock);
+    Sfx *x = &sfx[id];
+    if (x->wav && wo_open && x->pcm) {
+        if (slot < 0) { /* a slot that's done; else the next one in turn */
+            for (int k = 1; k < SFX_SLOTS && slot < 0; ++k)
+                if (!sfx_slot[k].busy || (sfx_slot[k].hdr.dwFlags & WHDR_DONE)) slot = k;
+            if (slot < 0) slot = sfx_next, sfx_next = sfx_next % (SFX_SLOTS - 1) + 1;
+        }
+        SfxSlot *s = &sfx_slot[slot];
+        slot_stop(s);
+        if (s->h && memcmp(&s->fmt, &x->fmt, sizeof(WAVEFORMATEX))) wo_close(s->h), s->h = NULL;
+        if (!s->h && wo_open(&s->h, WAVE_MAPPER, &x->fmt, 0, 0, CALLBACK_NULL) != MMSYSERR_NOERROR) s->h = NULL;
+        if (s->h) {
+            s->fmt = x->fmt;
+            memset(&s->hdr, 0, sizeof(s->hdr));
+            s->hdr.lpData = (LPSTR)x->pcm;
+            s->hdr.dwBufferLength = x->bytes;
+            if (wo_prepare(s->h, &s->hdr, sizeof(WAVEHDR)) == MMSYSERR_NOERROR) {
+                if (wo_write(s->h, &s->hdr, sizeof(WAVEHDR)) == MMSYSERR_NOERROR) s->busy = 1, ok = 1;
+                else wo_unprepare(s->h, &s->hdr, sizeof(WAVEHDR));
+            }
+        }
+    }
+    if (!ok && x->wav && play_sound) { /* one at a time, but it plays */
+        if (!logged_fallback++) log_line("sounds: waveOut didn't open, PlaySound instead");
+        ok = play_sound((LPCWSTR)x->wav, NULL, TS_SND_MEMORY | TS_SND_ASYNC | TS_SND_NODEFAULT) != 0;
+    }
+    ReleaseSRWLockExclusive(&sfx_lock);
+    return ok;
+}
+
+static void sfx_stop(int slot) {
+    AcquireSRWLockExclusive(&sfx_lock);
+    slot_stop(&sfx_slot[slot]);
+    ReleaseSRWLockExclusive(&sfx_lock);
 }
 
 static void door_sound(int shut) {
-    if (play_sound && door_wav[shut]) play_sound((LPCWSTR)door_wav[shut], NULL, TS_SND_MEMORY | TS_SND_ASYNC | TS_SND_NODEFAULT);
+    sfx_play(shut ? SFX_DOOR_CLOSE : SFX_DOOR_OPEN, -1);
+}
+
+/* the core's own sounds (TS_SOUND_BELL ...): the built-in WAV, or 0 if the game's sound should play instead */
+static int own_sound(int which) {
+    if (opt_sounds <= 0) return 0;
+    int id = which == TS_SOUND_BELL ? SFX_BUS_BELL : which == TS_SOUND_GONG ? SFX_BUS_GONG
+           : which == TS_SOUND_REQUEST ? SFX_RIDE_REQUEST : which == TS_SOUND_PAYOUT ? SFX_PAYOUT : -1;
+    return id >= 0 && sfx_play(id, -1);
+}
+
+/* the speed warning (0.5.1): the sign's level each step -> the tones (chimes.c decides when) */
+static TsSpeedWarn speed_warn;
+static void speed_warn_step(int level) {
+    if (!opt_speed_warn || opt_sounds <= 0) level = 0;
+    int r = ts_speed_warn(&speed_warn, level, (double)GetTickCount64() / 1000.0);
+    if (r == TS_WARN_YELLOW) sfx_play(SFX_SPEED_WARN, SFX_SLOT_WARN);
+    else if (r == TS_WARN_RED) sfx_play(SFX_SPEED_ALARM, SFX_SLOT_WARN);
+    else if (r == TS_WARN_STOP) sfx_stop(SFX_SLOT_WARN);
 }
 
 /* worker: a door step from the core */
@@ -1005,6 +1183,9 @@ static void push_hud(const TsHud *h) {
 }
 
 static void play(int which) {
+    if (own_sound(which)) return;
+    if (which == TS_SOUND_BELL) which = TS_SOUND_TICK; /* "Sounds" off: the game's sounds as before 0.5.1 */
+    else if (which == TS_SOUND_REQUEST || which == TS_SOUND_PAYOUT) which = TS_SOUND_NOTIFY;
     uint32_t sound = which == TS_SOUND_NOTIFY ? FH2_SOUND_NOTIFY : which == TS_SOUND_TICK ? FH2_SOUND_TICK
                    : which == TS_SOUND_TICK_END ? FH2_SOUND_TICK_END : which == TS_SOUND_ERROR ? FH2_SOUND_ERROR : 0;
     if (sound && api->api_version >= 10) api->play_ui_sound(mod, sound);
@@ -1031,13 +1212,17 @@ static void deliver(const TsEvent *e, int german) {
         t.subtitle = e->text;
         t.icon = e->icon == TS_ICON_PAYOUT ? FH2_ICON_PAYOUT : e->icon == TS_ICON_ROADS ? FH2_ICON_ROADS
                : e->icon == TS_ICON_TROPHY ? FH2_ICON_TROPHY : FH2_ICON_NONE;
-        t.sound = e->sound == TS_SOUND_NOTIFY ? FH2_SOUND_NOTIFY : 0;
+        /* 0.5.1: a payout or a request plays its own sound (the game's notify if "Sounds" is off) */
+        int own = (e->sound == TS_SOUND_PAYOUT || e->sound == TS_SOUND_REQUEST) && own_sound(e->sound);
+        t.sound = !own && (e->sound == TS_SOUND_NOTIFY || e->sound == TS_SOUND_PAYOUT || e->sound == TS_SOUND_REQUEST) ? FH2_SOUND_NOTIFY : 0;
         t.expire_s = 30;
         api->show_toast(mod, &t);
     } else if (e->kind == TS_EV_FEED) {
         log_line("chat: %s: %s", e->title, e->text);
         if (!(hud_ok() & FH2_HUD_AVAILABLE)) phone_window_feed(e->title, e->text, e->style); /* the HUD layer is off: our own lines */
         if (opt_voices > 0 && e->speaker >= 0) voice_say(e->text, german, e->voice_female, e->voice_pitch, e->voice_rate);
+        else if (opt_voices > 0 && e->speaker == TS_SPEAKER_ANNOUNCE) voice_say(e->text, german, 1, -1, -1); /* 0.5: the bus's announcement */
+        else if (opt_voices > 0 && e->speaker == TS_SPEAKER_DRIVER) voice_say(e->text, german, 0, -6, 0); /* 0.5.1: you: male, lower than any passenger, always the same */
         if (hud && hud_added && hud->version >= 2) {
             /* the feed takes 64 characters a line (more are cut off): a longer line goes on in the next ones */
             char parts[4][TS_TEXT];
@@ -1203,10 +1388,49 @@ static DWORD WINAPI keys_thread(LPVOID unused) {
             if (vk == VK_UP) InterlockedExchange(&want_prev, 1);
             else if (vk == VK_DOWN) InterlockedExchange(&want_next, 1);
             else if (vk == VK_RETURN) InterlockedExchange(&want_accept, 1);
-            else if (vk == VK_BACK) InterlockedExchange(&want_toggle, 1);
+            else if (vk == VK_BACK) InterlockedExchange(&want_back, 1);
             else if (vk == VK_LEFT) InterlockedExchange(&want_tab, -1);
             else if (vk == VK_RIGHT) InterlockedExchange(&want_tab, 1);
         }
+        /* 0.5.1: the reply key, and whether the player drives with the keyboard (W A S D or the arrows): only then
+           passengers ask questions, so controller and wheel players never see a prompt they can't answer */
+        if (game_in_front()) {
+            static const int drive_vks[8] = {'W', 'A', 'S', 'D', VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT};
+            for (int i = 0; i < 8; ++i)
+                if (!(phone_is_open && i >= 4) && (read(drive_vks[i]) & 0x8000)) InterlockedExchange64(&keyboard_drive_ms, (LONGLONG)now);
+            int reply_down = (read(opt_reply_vk) & 0x8000) != 0;
+            if (reply_down && !down[opt_reply_vk & 0xFF]) InterlockedExchange(&want_reply, 1);
+            down[opt_reply_vk & 0xFF] = reply_down;
+        }
+    }
+}
+
+/* 0.8: a controller chord's name for the prompt: "LB+RB+↓" */
+static void pad_name(uint32_t pad, char *out, size_t size) {
+    static const struct { uint32_t bit; const char *name; } names[] = {
+        {FH2_PAD_LB, "LB"}, {FH2_PAD_RB, "RB"}, {FH2_PAD_A, "A"}, {FH2_PAD_B, "B"}, {FH2_PAD_X, "X"}, {FH2_PAD_Y, "Y"},
+        {FH2_PAD_DPAD_UP, "\xE2\x86\x91"}, {FH2_PAD_DPAD_DOWN, "\xE2\x86\x93"}, {FH2_PAD_DPAD_LEFT, "\xE2\x86\x90"},
+        {FH2_PAD_DPAD_RIGHT, "\xE2\x86\x92"}, {FH2_PAD_START, "Start"}, {FH2_PAD_BACK, "Back"}, {FH2_PAD_LTHUMB, "LS"},
+        {FH2_PAD_RTHUMB, "RS"}};
+    size_t k = 0;
+    out[0] = 0;
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+        if (pad & names[i].bit) {
+            int n = snprintf(out + k, size - k, "%s%s", k ? "+" : "", names[i].name);
+            if (n < 0 || (size_t)n >= size - k) break;
+            k += (size_t)n;
+        }
+}
+
+/* the reply key's name for the prompt: "B", "7", "F12" */
+static void key_name(int vk, char *out, size_t size) {
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) snprintf(out, size, "%c", vk);
+    else if (vk >= VK_F1 && vk <= VK_F24) snprintf(out, size, "F%d", vk - VK_F1 + 1);
+    else {
+        char name[32] = "";
+        UINT scan = MapVirtualKeyW((UINT)vk, 0 /* MAPVK_VK_TO_VSC */);
+        if (!scan || !GetKeyNameTextA((LONG)(scan << 16), name, sizeof(name))) snprintf(name, sizeof(name), "%d", vk);
+        snprintf(out, size, "%s", name);
     }
 }
 
@@ -1229,13 +1453,13 @@ typedef struct {
 } PhoneSetting;
 
 static PhoneSetting phone_settings[TS_SETTING_ROWS] = {
-    {"PhoneStyle", "Handy-Design", "Phone design", &opt_phone_style, TS_THEMES},
+    {"Device", "Gerät", "Device", &opt_device, TS_DEVICES},
+    {"PhoneStyle", "Design", "Design", &opt_phone_style, TS_THEMES},
     {"Language", "Sprache", "Language", &opt_language, 3},
     {"TimeLimit", "Zeitlimits", "Time limits", &opt_time_limit, 3},
     {"Complaints", "Fahrgäste meckern", "Passenger complaints", &opt_complaints, 2},
     {"AutoNavigation", "Navigation automatisch", "Auto GPS", &opt_nav, 2},
     {"CareerExtras", "Ruf, Sonderfahrten, Wünsche", "Reputation, specials, wishes", &opt_extras, 2},
-    {"BusLinesNeedBus", "Buslinien nur im Bus", "Bus lines need the bus", &opt_bus_needs_bus, 2},
     {"Voices", "Stimmen (Versuch)", "Voices (experimental)", &opt_voices, 4},
 };
 
@@ -1245,13 +1469,13 @@ static const char *phone_setting_value(int i, int de) {
     static const char *const voices[4] = {"Aus", "Leise", "Normal", "Laut"}, *const voices_en[4] = {"Off", "Quiet", "Normal", "Loud"};
     int v = *phone_settings[i].value;
     if (v < 0 || v >= phone_settings[i].count) v = 0;
-    switch (i) {
-    case 0: return ts_theme_name(v, de);
-    case 1: return de ? langs[v] : langs_en[v];
-    case 2: return de ? limits[v] : limits_en[v];
-    case 7: return de ? voices[v] : voices_en[v];
-    default: return v ? (de ? "An" : "On") : (de ? "Aus" : "Off");
-    }
+    const char *key = phone_settings[i].key;
+    if (!strcmp(key, "Device")) return ts_device_name(v, de);
+    if (!strcmp(key, "PhoneStyle")) return ts_theme_name(v, de);
+    if (!strcmp(key, "Language")) return de ? langs[v] : langs_en[v];
+    if (!strcmp(key, "TimeLimit")) return de ? limits[v] : limits_en[v];
+    if (!strcmp(key, "Voices")) return de ? voices[v] : voices_en[v];
+    return v ? (de ? "An" : "On") : (de ? "Aus" : "Off");
 }
 
 /* under the lock */
@@ -1328,9 +1552,22 @@ static DWORD WINAPI worker(LPVOID unused) {
         core.extras_off = !opt_extras;
         core.complaints_off = !opt_complaints;
         core.doors_on = opt_doors;
+        core.cards_on = opt_dash && phone_window_ok(); /* 0.6: the cards after a ride live in the ride panel */
+        /* 0.8: questions for everyone (before: only after driving with the keyboard, so controller players never got
+           one); the chip names the controller chord unless the keyboard was used for driving lately */
+        core.replies_on = opt_replies;
+        {
+            ULONGLONG now_ms = GetTickCount64();
+            int keyboard = now_ms - (ULONGLONG)keyboard_drive_ms < 120000 && now_ms - (ULONGLONG)pad_reply_ms > 120000;
+            if (keyboard || !reply_pad) key_name(opt_reply_vk, core.reply_key, sizeof(core.reply_key));
+            else pad_name(reply_pad, core.reply_key, sizeof(core.reply_key));
+        }
+        if (InterlockedExchange(&want_reply, 0) && core.replies_on) ts_reply(&core);
         core.door_shut_s = (float)opt_door_shut_ms / 1000.0f;
         if (imperial >= 0) core.imperial = imperial;
         if (InterlockedExchange(&want_toggle, 0)) ts_phone_toggle(&core);
+        if (InterlockedExchange(&want_back, 0)) ts_phone_back(&core);
+        core.map_preview = opt_map_preview;
         if (InterlockedExchange(&want_next, 0)) ts_phone_next(&core);
         if (InterlockedExchange(&want_prev, 0)) ts_phone_prev(&core);
         LONG tab = InterlockedExchange(&want_tab, 0);
@@ -1363,17 +1600,23 @@ static DWORD WINAPI worker(LPVOID unused) {
         if (save) save_stats(&stats);
         /* the phone: its own window over the game (the HUD list only when the window can't be made) */
         TsHud hud_h = h;
+        {   /* 0.5.1: the speed warning's tones, while the sign is on screen (not over the pause menu or the map) */
+            uint32_t ui = api->api_version >= 10 ? api->ui_status(mod) : 0;
+            int on_screen = !(ui & FH2_UI_TOASTS) || (ui & FH2_UI_ON_SCREEN);
+            speed_warn_step(h.sign_limit > 0 && on_screen ? h.sign_over : 0);
+        }
         int window = phone_window_ok();
         if (window) {
             uint32_t ui = api->api_version >= 10 ? api->ui_status(mod) : 0;
             int page = !(ui & FH2_UI_TOASTS) || (ui & FH2_UI_ON_SCREEN); /* not over the pause menu or the map */
-            phone_window_show(&h, opt_phone_style, h.panel && page);
+            phone_window_show(&h, opt_phone_style | opt_device << 8, h.panel && page); /* 0.5: the device in the high byte */
             hud_h.panel = 0;
             if (h.panel && !page && !logged_page_wait++) log_line("phone window waits: the HUD page is not on screen");
             /* with a passenger: a speed-limit sign top left instead of the "Max 120" chip */
             int sign = h.sign_limit > 0 && page;
             /* the ride panel by the speedometer during the whole job (before pickup: where to and how far); then nothing at the top */
-            phone_window_dash(&h, job && page && opt_dash);
+            /* 0.6: also while a card (after a ride, a shift, a new tier) shows */
+            phone_window_dash(&h, (job || h.card.kind) && page && opt_dash);
             if (job && opt_dash) hud_h.chips = 0;
             if (sign) {
                 if (h.sign_over) snprintf(hud_h.chip2, sizeof(hud_h.chip2), "%s", de ? "Zu schnell!" : "Too fast!");
@@ -1396,13 +1639,80 @@ static void on_hotkey(void *user, const char *key) {
     if (!strcmp(key, "Phone")) InterlockedExchange(&want_toggle, 1);
     else if (!strcmp(key, "Next")) InterlockedExchange(&want_next, 1);
     else if (!strcmp(key, "Accept")) InterlockedExchange(&want_accept, 1);
+    else if (!strcmp(key, "Reply")) {
+        InterlockedExchange(&want_reply, 1);
+        InterlockedExchange64(&pad_reply_ms, (LONGLONG)GetTickCount64());
+    }
 }
 
 static void on_rebind(void *user, const char *key, uint32_t vk, uint32_t modifiers, uint32_t pad) {
     (void)user;
     for (int i = 0; i < 3; ++i)
         if (!strcmp(key, key_names[i])) key_vk[i] = vk, key_mod[i] = modifiers, key_pad[i] = pad;
+    if (!strcmp(key, "Reply")) {
+        reply_pad = pad;
+        if (vk) opt_reply_vk = (int)vk;
+    }
     save_settings();
+}
+
+/* a whole file into memory (NULL if missing or bigger than `limit`) */
+static void *read_whole(const wchar_t *path, size_t limit, size_t *size) {
+    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (f == INVALID_HANDLE_VALUE) return NULL;
+    LARGE_INTEGER sz;
+    void *data = NULL;
+    DWORD got = 0;
+    if (GetFileSizeEx(f, &sz) && sz.QuadPart > 0 && (unsigned long long)sz.QuadPart <= limit) {
+        data = malloc((size_t)sz.QuadPart);
+        if (data && !ReadFile(f, data, (DWORD)sz.QuadPart, &got, NULL)) got = 0;
+    }
+    CloseHandle(f);
+    if (!data || got != (DWORD)sz.QuadPart) return free(data), NULL;
+    *size = (size_t)got;
+    return data;
+}
+
+/* 0.9: the phone's map from the game's own files on this PC (gamemap.c: the pause menu's map picture, restyled dark,
+   and the game's road network). Nothing of the game is in the mod. Made on its own thread (a second or two); the
+   phone shows the plain map until it's there. A Karte.bmp in the mod's folder (0.7, tools/make_map.py) is only
+   the fallback when the game's files can't be read. */
+static wchar_t map_game_dir[MAX_PATH], map_folder[MAX_PATH];
+
+static DWORD WINAPI map_thread(LPVOID arg) {
+    (void)arg;
+    DWORD t0 = GetTickCount();
+    if (map_game_dir[0]) {
+        wchar_t zp[MAX_PATH], np[MAX_PATH];
+        size_t zn = 0, nn = 0;
+        _snwprintf(zp, MAX_PATH, L"%ls\\media\\ui\\textures\\data_bound\\Anthem_Map.zip", map_game_dir);
+        _snwprintf(np, MAX_PATH, L"%ls\\media\\tracks\\anthem\\ribbon_00\\anthem_00.nav", map_game_dir);
+        void *zip = read_whole(zp, 256u << 20, &zn), *nav = read_whole(np, 64u << 20, &nn);
+        int got = ts_gamemap_load((const uint8_t *)zip, zn, (const uint8_t *)nav, nn);
+        free(zip), free(nav);
+        log_line("map: from the game's files: picture %s, roads %s (%d lines), %dx%d, %lu ms", zip ? (got & TS_GAMEMAP_PICTURE ? "ok" : "unreadable") : "missing",
+                 nav ? (got & TS_GAMEMAP_ROADS ? "ok" : "unreadable") : "missing", ts_map_road_count(), ts_map_width(), ts_map_height(),
+                 (unsigned long)(GetTickCount() - t0));
+        if (got & TS_GAMEMAP_PICTURE) return 0;
+    } else log_line("map: the platform didn't say where the game is");
+    if (map_folder[0]) {
+        wchar_t path[MAX_PATH];
+        size_t n = 0;
+        _snwprintf(path, MAX_PATH, L"%ls\\Karte.bmp", map_folder);
+        void *data = read_whole(path, 64u << 20, &n);
+        if (data && ts_map_load_bmp(data, n)) log_line("map: Karte.bmp %dx%d (the game's map couldn't be read)", ts_map_width(), ts_map_height());
+        else if (data) log_line("map: Karte.bmp could not be read (8-bit BMP from tools/make_map.py expected)");
+        free(data);
+    }
+    if (!ts_map_ok()) log_line("map: none (the phone shows the places on a plain background)");
+    return 0;
+}
+
+static void map_load(const wchar_t *folder) {
+    if (api->game_dir) _snwprintf(map_game_dir, MAX_PATH, L"%ls", api->game_dir);
+    if (folder) _snwprintf(map_folder, MAX_PATH, L"%ls", folder);
+    HANDLE t = CreateThread(NULL, 0, map_thread, NULL, 0, NULL);
+    if (t) CloseHandle(t);
 }
 
 static void on_setting(void *user, const char *key, int value) {
@@ -1411,7 +1721,18 @@ static void on_setting(void *user, const char *key, int value) {
     else if (!strcmp(key, "CareerExtras")) opt_extras = value != 0;
     else if (!strcmp(key, "Complaints")) opt_complaints = value != 0;
     else if (!strcmp(key, "PassengerDoors")) opt_doors = value != 0;
+    else if (!strcmp(key, "SpeedWarning")) opt_speed_warn = value != 0;
+    else if (!strcmp(key, "Replies")) opt_replies = value != 0;
+    else if (!strcmp(key, "Sounds")) {
+        int was = opt_sounds;
+        opt_sounds = value < 0 || value > 3 ? 2 : value;
+        if (opt_sounds != was) {
+            sounds_load();
+            if (opt_sounds > 0) sfx_play(SFX_RIDE_REQUEST, -1); /* hear the new volume */
+        }
+    }
     else if (!strcmp(key, "RidePanel")) opt_dash = value != 0;
+    else if (!strcmp(key, "MapPreview")) opt_map_preview = value != 0;
     else if (!strcmp(key, "Voices")) {
         opt_voices = value < 0 || value > 3 ? 0 : value;
         apply_voices();
@@ -1425,6 +1746,7 @@ static void on_setting(void *user, const char *key, int value) {
     else if (!strcmp(key, "TimeLimit")) opt_time_limit = value;
     else if (!strcmp(key, "Language")) opt_language = value;
     else if (!strcmp(key, "PhoneStyle")) opt_phone_style = value >= 0 && value < TS_THEMES ? value : 0;
+    else if (!strcmp(key, "Device")) opt_device = value >= 0 && value < TS_DEVICES ? value : 0;
     save_settings();
 }
 
@@ -1555,6 +1877,16 @@ static void add_rows(void) {
 
     memset(&s, 0, sizeof(s));
     s.size = sizeof(s);
+    s.key = "MapPreview";
+    s.label = TR("row.MapPreview.label", "Map preview before accepting");
+    s.description = TR("row.MapPreview.description",
+                       "On: Enter on a ride or a bus line first shows it on the phone's map (where you are, the pickup, the destination, all stops); Enter again takes it, Backspace goes back. Off: Enter takes it at once. The map itself: the Map tab.");
+    s.value = opt_map_preview;
+    s.on_change = on_setting;
+    api->add_setting(mod, &s);
+
+    memset(&s, 0, sizeof(s));
+    s.size = sizeof(s);
     s.key = "Complaints";
     s.label = TR("row.Complaints.label", "Passenger complaints");
     s.description = TR("row.Complaints.description",
@@ -1570,6 +1902,26 @@ static void add_rows(void) {
     s.description = TR("row.PassengerDoors.description",
                        "When a passenger gets in or out, a door opens and closes with its sound: rear left, rear right or the front passenger door. Cars without a door animation only play the sound.");
     s.value = opt_doors;
+    s.on_change = on_setting;
+    api->add_setting(mod, &s);
+
+    memset(&s, 0, sizeof(s));
+    s.size = sizeof(s);
+    s.key = "SpeedWarning";
+    s.label = TR("row.SpeedWarning.label", "Speed warning tones");
+    s.description = TR("row.SpeedWarning.description",
+                       "With a passenger on board: a soft tone once when the speed sign turns yellow, a repeating chime while it is red.");
+    s.value = opt_speed_warn;
+    s.on_change = on_setting;
+    api->add_setting(mod, &s);
+
+    memset(&s, 0, sizeof(s));
+    s.size = sizeof(s);
+    s.key = "Replies";
+    s.label = TR("row.Replies.label", "Answer passengers");
+    s.description = TR("row.Replies.description",
+                       "Passengers sometimes ask you something. Press B on the keyboard or LB+RB+D-pad down on the controller to answer (change it under Pause > MODS or [Keys] ReplyKey / ReplyPad in TransportSim.ini), or stay quiet. With Voices on, your driver speaks in his own voice.");
+    s.value = opt_replies;
     s.on_change = on_setting;
     api->add_setting(mod, &s);
 
@@ -1613,6 +1965,21 @@ static void add_rows(void) {
         s.on_change = on_setting;
         api->add_setting(mod, &s);
 
+        const char *sounds[4] = {TR("row.Sounds.choice.0", "Off"), TR("row.Sounds.choice.1", "Quiet"),
+                                 TR("row.Sounds.choice.2", "Normal"), TR("row.Sounds.choice.3", "Loud")};
+        memset(&s, 0, sizeof(s));
+        s.size = sizeof(s);
+        s.key = "Sounds";
+        s.label = TR("row.Sounds.label", "Mod sounds");
+        s.description = TR("row.Sounds.description",
+                           "The mod's own sounds: speed warning, bus gong and stop bell, ride requests, payouts. Off: the game's menu sounds instead. Door sounds: [Doors] Volume in TransportSim.ini.");
+        s.kind = FH2_SETTING_CHOICE;
+        s.choices = sounds;
+        s.choice_count = 4;
+        s.value = opt_sounds;
+        s.on_change = on_setting;
+        api->add_setting(mod, &s);
+
         const char *languages[3] = {TR("row.Language.choice.0", "Game"), "Deutsch", "English"};
         memset(&s, 0, sizeof(s));
         s.size = sizeof(s);
@@ -1629,7 +1996,7 @@ static void add_rows(void) {
 
         const char *styles[TS_THEMES] = {TR("row.PhoneStyle.choice.0", "Night"), TR("row.PhoneStyle.choice.1", "Light"),
                                          TR("row.PhoneStyle.choice.2", "Festival"), TR("row.PhoneStyle.choice.3", "Ocean"),
-                                         "Carbon", "Riviera", "Gold"};
+                                         "Carbon", "Riviera", "Gold", TR("row.PhoneStyle.choice.7", "Pure")};
         memset(&s, 0, sizeof(s));
         s.size = sizeof(s);
         s.key = "PhoneStyle";
@@ -1639,6 +2006,21 @@ static void add_rows(void) {
         s.choices = styles;
         s.choice_count = TS_THEMES;
         s.value = opt_phone_style;
+        s.on_change = on_setting;
+        api->add_setting(mod, &s);
+
+        const char *devices[TS_DEVICES] = {TR("row.Device.choice.0", "Phone"), "Edge", "Tablet"};
+        memset(&s, 0, sizeof(s));
+        s.size = sizeof(s);
+        s.key = "Device";
+        s.label = TR("row.Device.label", "Device");
+        s.description = TR("row.Device.description",
+                            "What the app runs on. Phone: as before. Edge: slim, with a punch-hole camera and Android keys. "
+                            "Tablet: landscape and bigger, with the passenger, the line's stops and the logbook next to the list.");
+        s.kind = FH2_SETTING_CHOICE;
+        s.choices = devices;
+        s.choice_count = TS_DEVICES;
+        s.value = opt_device;
         s.on_change = on_setting;
         api->add_setting(mod, &s);
     }
@@ -1677,6 +2059,18 @@ static void add_keys(void) {
         k.on_rebind = on_rebind;
         if (!api->add_hotkey(mod, &k)) log_line("hotkey %s not added (see above)", key_names[i]);
     }
+    /* 0.8: answering passengers with the controller (the keyboard key is read directly, see the key thread) */
+    FH2Hotkey k;
+    memset(&k, 0, sizeof(k));
+    k.size = sizeof(k);
+    k.key = "Reply";
+    k.label = TR("hotkey.Reply.label", "Answer a passenger (controller)");
+    k.vk = 0;
+    k.pad_chord = reply_pad;
+    k.on_press = on_hotkey;
+    k.on_rebind = on_rebind;
+    if (!api->add_hotkey(mod, &k)) log_line("hotkey Reply not added (see above)");
+    else log_line("replies: key %d on the keyboard, controller chord 0x%04X", opt_reply_vk, (unsigned)reply_pad);
 }
 
 static void add_page(void) {
@@ -1780,7 +2174,9 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
 
     /* own folder next to azimuth.exe: settings, stats and logs */
     wchar_t folder[MAX_PATH];
+    int folder_ok = 0;
     if (api->azimuth_dir && _snwprintf(folder, MAX_PATH, L"%ls\\%ls", api->azimuth_dir, MOD_FOLDER) > 0) {
+        folder_ok = 1;
         CreateDirectoryW(folder, NULL);
         _snwprintf(ini_path, MAX_PATH, L"%ls\\TransportSim.ini", folder);
         _snwprintf(sound_folder, MAX_PATH, L"%ls\\sounds", folder);
@@ -1792,8 +2188,10 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     log_line("%s %s, platform %s (API %u)", MOD_NAME, MOD_VERSION, api->platform_version, api->api_version);
 
     load_settings();
+    map_load(folder_ok ? folder : NULL);
     if (opt_voices > 0) apply_voices();
-    doors_load_sounds();
+    sounds_load();
+    ts_speed_warn_init(&speed_warn);
     save_settings(); /* the INI shows every setting */
     ts_init(&core, (uint32_t)GetTickCount() ^ (uint32_t)GetCurrentProcessId() * 2654435761u, language_german());
     load_stats();
