@@ -1,0 +1,27 @@
+name: Discord release post
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post release to Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+          GAME: Forza Horizon 2
+        run: |
+          if [ -z "$TAG" ]; then TAG=$(gh release view -R "$REPO" --json tagName -q .tagName); fi
+          NAME=$(gh release view "$TAG" -R "$REPO" --json name -q .name)
+          BODY=$(gh release view "$TAG" -R "$REPO" --json body -q .body)
+          URL=$(gh release view "$TAG" -R "$REPO" --json url -q .url)
+          HEAD=$(printf '%s\n' "$BODY" | grep -m1 -E '^#{1,3} ' | sed -E 's/^#+ *//')
+          CONTENT=$(printf '🆕 **%s is out!** – for %s\n%s\n⬇️ %s' "$NAME" "$GAME" "$HEAD" "$URL")
+          jq -n --arg c "$CONTENT" '{content:$c}' > payload.json
+          curl -sS -f -X POST -H "Content-Type: application/json" --data @payload.json "$WEBHOOK"
