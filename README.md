@@ -5,7 +5,7 @@
 A ride-hailing and bus-line mod for **Forza Horizon 2 on PC**: take Uber-style rides and drive bus lines with virtual passengers who talk, remember you and rate your driving. Everything runs from a phone on the left of the screen (**F9**).
 One mod, one file (`TransportSim.dll`), for the [FH2 Mod Platform](https://github.com/Trinculo54/fh2-mod-platform). Texts in English and German.
 
-**[⬇ Download the latest version](../../releases/latest)** · current version: **0.9.1**
+**[⬇ Download the latest version](../../releases/latest)** · **[💬 Discord](https://discord.gg/g83eBcrq)** (help, ideas, new versions) · current version: **0.9.1**
 
 > Horizon Transit is new and in active development. The release list shows what is new.
 
@@ -80,6 +80,7 @@ All keys can be changed in Pause › MODS › YOUR MODS › Horizon Transit. LB 
 ## Problems?
 
 - Send `Azimuth\TransportSim\logs\` (newest file) and `fh2-mods\platform.log` with a GitHub [issue](../../issues/new).
+- Or ask in **#transit-help-and-bugs** on the [Discord](https://discord.gg/g83eBcrq).
 
 <details>
 <summary>Known limits</summary>
