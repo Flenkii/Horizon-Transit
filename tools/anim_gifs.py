@@ -113,8 +113,8 @@ def main(d, outdir):
         seq, name, sk, pk, mp, x0, y0, x1, y1, tc, t0, t1, t2, t3 = line.split()
         seqs.setdefault(seq, []).append({"name": name, "skey": sk, "pkey": pk, "map": int(mp), "rect": (int(x0), int(y0), int(x1), int(y1)),
                                          "tabs": int(tc), "trect": (int(t0), int(t1), int(t2), int(t3))})
-    titles = {"zoom": "karte-zoom", "tabs": "tabs", "auswahl": "auswahl", "vorschau": "fahrt-vorschau", "auftrag": "auftrag-zoom",
-              "navi": "navi-fahrt"}
+    titles = {"zoom": "map-zoom", "tabs": "tabs", "auswahl": "selection", "vorschau": "ride-preview", "auftrag": "job-zoom",
+              "navi": "navi-ride"}
     for seq, rows in seqs.items():
         save(sequence(d, rows), os.path.join(outdir, titles.get(seq, seq) + ".gif"))
 
@@ -130,7 +130,7 @@ def main(d, outdir):
         e = ease_out(i / FPS / 0.2)
         frames.append(on_bg(phone, size, (int(40 - e * 20), 0), 1 - e))
     frames += [on_bg(phone, size, (-1000, 0))] * 10
-    save(frames, os.path.join(outdir, "handy-oeffnen-schliessen.gif"))
+    save(frames, os.path.join(outdir, "phone-open-close.gif"))
 
     # the ride panel: comes up and fades in (0.35 s), a wish fades in (0.3 s), it goes down and fades out (0.25 s)
     a, b = render(d, "gifdash_a_0"), render(d, "gifdash_b_0")
@@ -149,7 +149,7 @@ def main(d, outdir):
         k = i / FPS / 0.25
         frames.append(on_bg(b, size, (20, 20 + int(10 * k)), 1 - min(k, 1)))
     frames += [on_bg(a, size, (-2000, 0))] * 6
-    save(frames, os.path.join(outdir, "fahrt-panel.gif"), 1.0)
+    save(frames, os.path.join(outdir, "ride-panel.gif"), 1.0)
 
     # the passengers' lines: the first fades in, the next ones fade over (0.3 s), the last fades out
     lines = [render(d, "giffeed1_0"), render(d, "giffeed2_0"), render(d, "feed_0")]
@@ -168,7 +168,7 @@ def main(d, outdir):
     for i in range(int(0.3 * FPS) + 1):
         frames.append(on_bg(lines[2], size, (20, 20), 1 - ease_out(i / FPS / 0.3)))
     frames += [empty] * 8
-    save(frames, os.path.join(outdir, "fahrgast-zeilen.gif"), 1.0)
+    save(frames, os.path.join(outdir, "passenger-lines.gif"), 1.0)
 
 
 if __name__ == "__main__":

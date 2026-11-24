@@ -11,137 +11,137 @@ const TsPlace ts_places[] = {
     {"Nizza", 1, {-347.57f, 4.78f, -5812.67f}}, /* westnice_destination_spatial_zone */
     {"Sisteron", 1, {-3743.55f, 70.53f, -1843.99f}}, /* sisteron_destination_spatial_zone */
     {"Alpes de Haute", 1, {-1806.72f, 116.35f, -1048.74f}}, /* alpesdehaute_destination_trigger_zone */
-    {"Nizza · Haltestelle 1", 3, {411.82f, 28.02f, -4776.66f}}, /* fra_obj_sign_busstop x2 */
-    {"Nizza · Haltestelle 2", 3, {592.84f, 10.10f, -5039.91f}}, /* fra_obj_sign_busstop x2 */
-    {"Nizza · Haltestelle 3", 3, {728.57f, 16.13f, -5024.87f}}, /* fra_obj_sign_busstop x1 */
-    {"Nizza · Haltestelle 4", 3, {869.76f, 13.03f, -4867.92f}}, /* fra_obj_sign_busstop x1 */
-    {"Nizza · Haltestelle 5", 3, {889.07f, 11.35f, -5056.34f}}, /* fra_obj_sign_busstop x1 */
-    {"Nizza · Haltestelle 6", 3, {919.69f, 11.88f, -4985.12f}}, /* fra_obj_sign_busstop x1 */
-    {"Nizza · Haltestelle 7", 3, {955.66f, 15.24f, -4810.90f}}, /* fra_obj_sign_busstop x1 */
-    {"Nizza · Haltestelle 8", 3, {1062.07f, 12.07f, -4926.89f}}, /* fra_obj_sign_busstop x1 */
-    {"Saint Martin · Haltestelle 1", 3, {1243.71f, 61.56f, -4422.25f}}, /* fra_obj_sign_busstop x1 */
-    {"Saint Martin · Haltestelle 2", 3, {1535.89f, 72.03f, -4532.07f}}, /* fra_obj_sign_busstop x2 */
-    {"Montellino · Haltestelle 1", 3, {8863.60f, 154.42f, -2957.10f}}, /* fra_obj_sign_busstop x1 */
-    {"Sisteron · Parkplatz 1", 4, {-3566.54f, 71.50f, -2138.10f}}, /* type2_parking_area_033 */
-    {"Sisteron · Parkplatz 2", 4, {-4158.16f, 73.16f, -1725.11f}}, /* type2_parking_area_034 */
-    {"Sisteron · Parkplatz 3", 4, {-4110.43f, 121.27f, -1943.80f}}, /* type2_parking_area_038 */
-    {"Sisteron · Parkplatz 4", 4, {-4082.06f, 100.96f, -2075.33f}}, /* type2_parking_area_041 */
-    {"Bei Horizon Festival · Parkplatz 1", 4, {4250.91f, 84.88f, -8028.67f}}, /* type2_parking_area_049 */
-    {"Bei Horizon Festival · Parkplatz 2", 4, {4496.86f, 168.05f, -7785.07f}}, /* type2_parking_area_050 */
-    {"Bei Horizon Festival · Parkplatz 3", 4, {4298.95f, 161.14f, -8369.17f}}, /* type2_parking_area_052 */
-    {"Bei Horizon Festival · Parkplatz 4", 4, {4154.29f, 105.99f, -8305.57f}}, /* type2_parking_area_054 */
-    {"San Giovanni · Parkplatz 1", 4, {5375.87f, 160.15f, -3098.11f}}, /* type2_parking_area_063 */
-    {"San Giovanni · Parkplatz 2", 4, {5144.64f, 158.56f, -3886.53f}}, /* type2_parking_area_064 */
-    {"San Giovanni · Parkplatz 3", 4, {5302.43f, 150.17f, -4012.85f}}, /* type2_parking_area_069 */
-    {"San Giovanni · Parkplatz 4", 4, {5298.37f, 159.48f, -3873.10f}}, /* type2_parking_area_072 */
-    {"San Giovanni · Parkplatz 5", 4, {4676.91f, 137.44f, -4240.46f}}, /* type2_parking_area_075 */
-    {"San Giovanni · Parkplatz 6", 4, {4875.21f, 150.42f, -4090.28f}}, /* type2_parking_area_077 */
-    {"San Giovanni · Parkplatz 7", 4, {4749.12f, 145.32f, -4035.70f}}, /* type2_parking_area_081 */
-    {"Sisteron · Parkplatz 5", 4, {-3923.23f, 87.49f, -1991.02f}}, /* type4_parking_area_007 */
-    {"Sisteron · Parkplatz 6", 4, {-3792.62f, 81.19f, -2257.07f}}, /* type4_parking_area_009 */
-    {"Sisteron · Parkplatz 7", 4, {-4039.64f, 80.90f, -1760.08f}}, /* type4_parking_area_026 */
-    {"Sisteron · Parkplatz 8", 4, {-3731.06f, 89.53f, -2366.68f}}, /* type4_parking_area_033 */
-    {"Sisteron · Parkplatz 9", 4, {-2982.64f, 77.73f, -2517.00f}}, /* type4_parking_area_036 */
-    {"Bei Nizza · Parkplatz 1", 4, {-3149.11f, 2.02f, -6020.31f}}, /* type4_parking_area_048 */
-    {"Castelletto · Parkplatz 1", 4, {9638.95f, 5.42f, -7850.56f}}, /* type4_parking_area_075 */
-    {"Castelletto · Parkplatz 2", 4, {9480.35f, 32.76f, -7576.36f}}, /* type4_parking_area_078 */
-    {"Castelletto · Parkplatz 3", 4, {9517.36f, 31.98f, -7381.59f}}, /* type4_parking_area_084 */
-    {"Castelletto · Parkplatz 4", 4, {9777.06f, 11.07f, -7939.28f}}, /* type4_parking_area_092 */
-    {"Castelletto · Parkplatz 5", 4, {10048.20f, 16.02f, -7586.43f}}, /* type4_parking_area_094 */
-    {"San Giovanni · Parkplatz 8", 4, {5128.29f, 172.25f, -3174.48f}}, /* type4_parking_area_097 */
-    {"San Giovanni · Parkplatz 9", 4, {5061.82f, 152.16f, -3992.55f}}, /* type4_parking_area_100 */
-    {"San Giovanni · Parkplatz 10", 4, {5247.59f, 172.55f, -3290.51f}}, /* type4_parking_area_101 */
-    {"Sisteron · Parkplatz 10", 4, {-3406.61f, 84.64f, -2421.93f}}, /* type4_parking_area_108 */
-    {"Sisteron · Parkplatz 11", 4, {-3639.54f, 68.86f, -1912.87f}}, /* type4_parking_area_112 */
-    {"San Giovanni · Parkplatz 11", 4, {5364.11f, 172.55f, -3329.87f}}, /* type5_parking_area_000 */
-    {"San Giovanni · Parkplatz 12", 4, {5491.96f, 166.95f, -3318.04f}}, /* type5_parking_area_001 */
-    {"Nizza · Parkplatz 2", 4, {793.21f, 2.17f, -5816.79f}}, /* type6_parking_area_000 */
-    {"Nizza · Parkplatz 3", 4, {902.85f, 3.42f, -5619.13f}}, /* type6_parking_area_001 */
-    {"Nizza · Parkplatz 4", 4, {710.98f, 8.75f, -6140.88f}}, /* type6_parking_area_002 */
-    {"Nizza · Parkplatz 5", 4, {-1527.69f, 3.25f, -6334.29f}}, /* type6_parking_area_013 */
-    {"Nizza · Parkplatz 6", 4, {-1419.71f, 3.25f, -6266.01f}}, /* type6_parking_area_016 */
-    {"Nizza · Parkplatz 7", 4, {-911.67f, 2.57f, -5970.44f}}, /* type6_parking_area_018 */
-    {"Nizza · Parkplatz 8", 4, {-535.77f, 5.61f, -5678.74f}}, /* type6_parking_area_020 */
-    {"Nizza · Parkplatz 9", 4, {-1151.79f, 5.43f, -6017.86f}}, /* type6_parking_area_022 */
-    {"Nizza · Parkplatz 10", 4, {-994.45f, 2.94f, -6084.06f}}, /* type6_parking_area_024 */
-    {"Nizza · Parkplatz 11", 4, {-806.85f, 2.62f, -6045.61f}}, /* type6_parking_area_028 */
-    {"Nizza · Parkplatz 12", 4, {-1255.19f, 3.26f, -6177.20f}}, /* type6_parking_area_030 */
-    {"Nizza · Parkplatz 13", 4, {-296.48f, 3.11f, -5991.11f}}, /* type6_parking_area_033 */
-    {"Nizza · Parkplatz 14", 4, {-563.64f, 3.00f, -5860.16f}}, /* type6_parking_area_036 */
-    {"Nizza · Parkplatz 15", 4, {-231.06f, 5.88f, -5737.94f}}, /* type6_parking_area_040 */
-    {"San Giovanni · Parkplatz 13", 4, {4594.19f, 132.77f, -4072.79f}}, /* type6_parking_area_046 */
-    {"Nizza · Parkplatz 16", 4, {-171.54f, 3.43f, -5982.75f}}, /* type6_parking_area_052 */
-    {"Landstraße bei Horizon Festival · 1", 2, {5380.98f, 192.00f, -8550.96f}}, /* race_trigger_zone_rt29 */
-    {"Castelletto · Treffpunkt 1", 2, {7575.96f, 122.00f, -8477.96f}}, /* race_trigger_zone_rt30 */
-    {"Castelletto · Treffpunkt 2", 2, {8763.96f, 50.00f, -8155.96f}}, /* race_trigger_zone_rt31 */
-    {"Horizon Festival · Treffpunkt 2", 2, {6319.98f, 164.00f, -8324.96f}}, /* race_trigger_zone_rt33 */
-    {"Castelletto · Treffpunkt 3", 2, {9971.96f, 90.00f, -6957.96f}}, /* race_trigger_zone_rt34 */
-    {"Castelletto · Treffpunkt 4", 2, {8869.96f, 96.00f, -6815.96f}}, /* race_trigger_zone_rt35 */
-    {"Castelletto · Treffpunkt 5", 2, {9220.96f, 59.00f, -6958.96f}}, /* race_trigger_zone_rt37 */
-    {"Horizon Festival · Treffpunkt 3", 2, {5939.98f, 126.00f, -6863.96f}}, /* race_trigger_zone_rt40 */
-    {"Landstraße bei Horizon Festival · 4", 2, {3845.98f, 125.00f, -7846.96f}}, /* race_trigger_zone_rt41 */
-    {"Horizon Festival · Treffpunkt 5", 2, {7111.96f, 138.00f, -6741.96f}}, /* race_trigger_zone_rt42 */
-    {"Landstraße bei Horizon Festival · 6", 2, {3573.98f, 49.00f, -8142.96f}}, /* race_trigger_zone_rt45 */
-    {"Landstraße bei Horizon Festival · 7", 2, {5868.98f, 190.00f, -8382.96f}}, /* race_trigger_zone_rt48 */
-    {"Horizon Festival · Treffpunkt 8", 2, {5410.98f, 139.00f, -6873.96f}}, /* race_trigger_zone_rt49 */
-    {"Castelletto · Treffpunkt 6", 2, {8439.96f, 127.00f, -6741.96f}}, /* race_trigger_zone_rt50 */
-    {"Castelletto · Treffpunkt 7", 2, {9548.96f, 152.00f, -6401.98f}}, /* race_trigger_zone_rt52 */
-    {"Horizon Festival · Treffpunkt 9", 2, {6805.96f, 140.00f, -8195.96f}}, /* race_trigger_zone_rt55 */
-    {"Landstraße bei Horizon Festival · 10", 2, {4960.98f, 202.00f, -8614.96f}}, /* race_trigger_zone_rt56 */
-    {"Castelletto · Treffpunkt 8", 2, {8418.79f, 100.87f, -8307.25f}}, /* race_trigger_zone_rt88 */
-    {"Horizon Festival · Treffpunkt 11", 2, {4922.98f, 163.00f, -7128.96f}}, /* race_trigger_zone_rt91 */
-    {"Saint Martin · Treffpunkt 1", 2, {1569.99f, 102.00f, -4189.98f}}, /* race_trigger_zone_rt92 */
-    {"Landstraße bei Horizon Festival · 12", 2, {3388.98f, 110.00f, -7426.96f}}, /* race_trigger_zone_rt93 */
-    {"Horizon Festival · Treffpunkt 13", 2, {7051.96f, 119.00f, -6435.98f}}, /* race_trigger_zone_rt94 */
-    {"Montellino · Treffpunkt 1", 2, {8609.88f, 106.45f, -5170.40f}}, /* race_trigger_zone_rt95 */
-    {"Landstraße bei Nizza · 1", 2, {2517.99f, 25.00f, -7086.96f}}, /* race_trigger_zone_rt100 */
-    {"Montellino · Treffpunkt 2", 2, {8869.71f, 85.70f, -4061.20f}}, /* race_trigger_zone_rt146 */
-    {"Montellino · Treffpunkt 3", 2, {8397.82f, 102.28f, -3659.04f}}, /* race_trigger_zone_rt162 */
-    {"Castelletto · Treffpunkt 9", 2, {9333.18f, 157.79f, -6170.08f}}, /* race_trigger_zone_rt243 */
-    {"Saint Martin · Treffpunkt 2", 2, {2273.82f, 130.56f, -3145.21f}}, /* race_trigger_zone_rt381 */
-    {"Montellino · Treffpunkt 4", 2, {7988.23f, 99.86f, -2607.25f}}, /* race_trigger_zone_rt1141 */
-    {"Montellino · Treffpunkt 5", 2, {9956.89f, 133.74f, -833.79f}}, /* race_trigger_zone_rt1142 */
-    {"Montellino · Treffpunkt 6", 2, {10734.29f, 156.51f, -4466.86f}}, /* race_trigger_zone_rt1151 */
-    {"Castelletto · Treffpunkt 10", 2, {10328.69f, 188.51f, -5856.14f}}, /* race_trigger_zone_rt1301 */
-    {"Saint Martin · Treffpunkt 3", 2, {2321.46f, 142.01f, -3636.46f}}, /* race_trigger_zone_rt1381 */
-    {"Saint Martin · Treffpunkt 4", 2, {2213.75f, 141.87f, -2454.75f}}, /* race_trigger_zone_rt1382 */
-    {"Saint Martin · Treffpunkt 5", 2, {304.98f, 83.80f, -3566.55f}}, /* race_trigger_zone_rt1442 */
-    {"Montellino · Treffpunkt 7", 2, {9931.36f, 194.17f, -4954.89f}}, /* race_trigger_zone_rt2121 */
-    {"Montellino · Treffpunkt 8", 2, {10000.65f, 122.54f, -1342.52f}}, /* race_trigger_zone_rt2151 */
-    {"Horizon Festival · Treffpunkt 14", 2, {7079.51f, 110.60f, -5296.46f}}, /* race_trigger_zone_rt2221 */
-    {"Castelletto · Treffpunkt 11", 2, {8593.95f, 106.69f, -5699.38f}}, /* race_trigger_zone_rt2231 */
-    {"Castelletto · Treffpunkt 12", 2, {9773.37f, 173.07f, -5884.93f}}, /* race_trigger_zone_rt2261 */
-    {"Saint Martin · Treffpunkt 6", 2, {1776.32f, 142.92f, -2726.76f}}, /* race_trigger_zone_rt2381 */
-    {"Saint Martin · Treffpunkt 7", 2, {1385.34f, 100.47f, -3790.66f}}, /* race_trigger_zone_rt2382 */
-    {"Landstraße bei Nizza · 2", 2, {-3421.57f, 1.96f, -5836.41f}}, /* race_trigger_zone_rt3000 */
-    {"Landstraße bei Nizza · 3", 2, {-4024.45f, 6.44f, -5739.03f}}, /* race_trigger_zone_rt3001 */
-    {"Landstraße bei Nizza · 4", 2, {-3510.32f, 1.94f, -6187.02f}}, /* race_trigger_zone_rt3002 */
-    {"Landstraße bei Nizza · 5", 2, {-3668.24f, 2.00f, -6601.66f}}, /* race_trigger_zone_rt3005 */
-    {"Saint Martin · Treffpunkt 8", 2, {618.97f, 110.57f, -1418.28f}}, /* race_trigger_zone_rt3020 */
-    {"Alpes de Haute · Treffpunkt 1", 2, {133.53f, 110.29f, -1162.75f}}, /* race_trigger_zone_rt3021 */
-    {"Alpes de Haute · Treffpunkt 2", 2, {300.63f, 110.29f, -1604.70f}}, /* race_trigger_zone_rt3022 */
-    {"Alpes de Haute · Treffpunkt 3", 2, {446.59f, 133.53f, -886.00f}}, /* race_trigger_zone_rt3023 */
-    {"Alpes de Haute · Treffpunkt 4", 2, {-142.85f, 110.29f, -1421.49f}}, /* race_trigger_zone_rt3024 */
-    {"Montellino · Treffpunkt 9", 2, {7346.61f, 77.97f, -1338.24f}}, /* race_trigger_zone_rt3030 */
-    {"Montellino · Treffpunkt 10", 2, {7723.44f, 76.71f, -1712.26f}}, /* race_trigger_zone_rt3031 */
-    {"Montellino · Treffpunkt 11", 2, {7012.09f, 82.62f, -1807.31f}}, /* race_trigger_zone_rt3032 */
-    {"Montellino · Treffpunkt 12", 2, {7359.98f, 97.80f, -1668.19f}}, /* race_trigger_zone_rt3033 */
-    {"Montellino · Treffpunkt 13", 2, {7324.55f, 87.83f, -2106.24f}}, /* race_trigger_zone_rt3034 */
-    {"Saint Martin · Treffpunkt 9", 2, {1960.90f, 128.63f, -3471.53f}}, /* race_trigger_zone_rt3040 */
-    {"Saint Martin · Treffpunkt 10", 2, {1236.38f, 105.95f, -3425.97f}}, /* race_trigger_zone_rt3042 */
-    {"Saint Martin · Treffpunkt 11", 2, {1620.83f, 118.79f, -3210.13f}}, /* race_trigger_zone_rt3044 */
-    {"Montellino · Treffpunkt 14", 2, {8794.17f, 91.18f, -4477.66f}}, /* race_trigger_zone_rt3050 */
-    {"Montellino · Treffpunkt 15", 2, {8281.02f, 87.87f, -4269.39f}}, /* race_trigger_zone_rt3051 */
-    {"Montellino · Treffpunkt 16", 2, {8991.14f, 144.40f, -5017.83f}}, /* race_trigger_zone_rt4151 */
-    {"Montellino · Treffpunkt 17", 2, {8686.86f, 96.50f, -3772.12f}}, /* race_trigger_zone_rt4161 */
-    {"Horizon Festival · Treffpunkt 15", 2, {7521.95f, 58.35f, -4367.11f}}, /* race_trigger_zone_rt4173 */
-    {"Montellino · Treffpunkt 18", 2, {7994.36f, 88.28f, -4162.09f}}, /* race_trigger_zone_rt4174 */
-    {"Saint Martin · Treffpunkt 12", 2, {1085.13f, 126.49f, -2691.73f}}, /* race_trigger_zone_rt4383 */
-    {"Alpes de Haute · Treffpunkt 5", 2, {-1761.91f, 72.30f, -2861.21f}}, /* race_trigger_zone_rt8001 */
-    {"Saint Martin · Treffpunkt 13", 2, {3439.87f, 130.37f, -2774.52f}}, /* race_trigger_zone_rt8002 */
-    {"Horizon Festival · Treffpunkt 16", 2, {7381.22f, 98.18f, -5235.00f}}, /* race_trigger_zone_rt8005 */
-    {"Montellino · Treffpunkt 19", 2, {9368.31f, 51.74f, -1542.07f}}, /* race_trigger_zone_rt8006 */
-    {"Saint Martin · Treffpunkt 14", 2, {3111.91f, 140.48f, -2580.12f}}, /* race_trigger_zone_rt9009 */
+    {"Nizza · Cimiez", 3, {411.82f, 28.02f, -4776.66f}}, /* fra_obj_sign_busstop x2 */
+    {"Nizza · Place Garibaldi", 3, {592.84f, 10.10f, -5039.91f}}, /* fra_obj_sign_busstop x2 */
+    {"Nizza · Rue Bonaparte", 3, {728.57f, 16.13f, -5024.87f}}, /* fra_obj_sign_busstop x1 */
+    {"Nizza · Gare Riquier", 3, {869.76f, 13.03f, -4867.92f}}, /* fra_obj_sign_busstop x1 */
+    {"Nizza · Port Lympia", 3, {889.07f, 11.35f, -5056.34f}}, /* fra_obj_sign_busstop x1 */
+    {"Nizza · Place Max Barel", 3, {919.69f, 11.88f, -4985.12f}}, /* fra_obj_sign_busstop x1 */
+    {"Nizza · Mont Alban", 3, {955.66f, 15.24f, -4810.90f}}, /* fra_obj_sign_busstop x1 */
+    {"Nizza · Boulevard Carnot", 3, {1062.07f, 12.07f, -4926.89f}}, /* fra_obj_sign_busstop x1 */
+    {"Saint Martin · Route de Nice", 3, {1243.71f, 61.56f, -4422.25f}}, /* fra_obj_sign_busstop x1 */
+    {"Saint Martin · Pont du Vallon", 3, {1535.89f, 72.03f, -4532.07f}}, /* fra_obj_sign_busstop x2 */
+    {"Montellino · Piazza Grande", 3, {8863.60f, 154.42f, -2957.10f}}, /* fra_obj_sign_busstop x1 */
+    {"Sisteron · Gare", 4, {-3566.54f, 71.50f, -2138.10f}}, /* type2_parking_area_033 */
+    {"Sisteron · Bords de la Durance", 4, {-4158.16f, 73.16f, -1725.11f}}, /* type2_parking_area_034 */
+    {"Sisteron · Citadelle", 4, {-4110.43f, 121.27f, -1943.80f}}, /* type2_parking_area_038 */
+    {"Sisteron · Tour de l'Horloge", 4, {-4082.06f, 100.96f, -2075.33f}}, /* type2_parking_area_041 */
+    {"Bei Horizon Festival · Lago Verde", 4, {4250.91f, 84.88f, -8028.67f}}, /* type2_parking_area_049 */
+    {"Bei Horizon Festival · Borgo Alto", 4, {4496.86f, 168.05f, -7785.07f}}, /* type2_parking_area_050 */
+    {"Bei Horizon Festival · Pieve", 4, {4298.95f, 161.14f, -8369.17f}}, /* type2_parking_area_052 */
+    {"Bei Horizon Festival · Osteria", 4, {4154.29f, 105.99f, -8305.57f}}, /* type2_parking_area_054 */
+    {"San Giovanni · Porta San Matteo", 4, {5375.87f, 160.15f, -3098.11f}}, /* type2_parking_area_063 */
+    {"San Giovanni · Rocca", 4, {5144.64f, 158.56f, -3886.53f}}, /* type2_parking_area_064 */
+    {"San Giovanni · Porta San Giovanni", 4, {5302.43f, 150.17f, -4012.85f}}, /* type2_parking_area_069 */
+    {"San Giovanni · Piazza della Cisterna", 4, {5298.37f, 159.48f, -3873.10f}}, /* type2_parking_area_072 */
+    {"San Giovanni · Il Poggio", 4, {4676.91f, 137.44f, -4240.46f}}, /* type2_parking_area_075 */
+    {"San Giovanni · Fonti", 4, {4875.21f, 150.42f, -4090.28f}}, /* type2_parking_area_077 */
+    {"San Giovanni · Cantina Vernaccia", 4, {4749.12f, 145.32f, -4035.70f}}, /* type2_parking_area_081 */
+    {"Sisteron · Cathédrale", 4, {-3923.23f, 87.49f, -1991.02f}}, /* type4_parking_area_007 */
+    {"Sisteron · Marché", 4, {-3792.62f, 81.19f, -2257.07f}}, /* type4_parking_area_009 */
+    {"Sisteron · Rocher de la Baume", 4, {-4039.64f, 80.90f, -1760.08f}}, /* type4_parking_area_026 */
+    {"Sisteron · Stade", 4, {-3731.06f, 89.53f, -2366.68f}}, /* type4_parking_area_033 */
+    {"Sisteron · Zone Artisanale", 4, {-2982.64f, 77.73f, -2517.00f}}, /* type4_parking_area_036 */
+    {"Bei Nizza · Port du Var", 4, {-3149.11f, 2.02f, -6020.31f}}, /* type4_parking_area_048 */
+    {"Castelletto · Marina", 4, {9638.95f, 5.42f, -7850.56f}}, /* type4_parking_area_075 */
+    {"Castelletto · Chiesa", 4, {9480.35f, 32.76f, -7576.36f}}, /* type4_parking_area_078 */
+    {"Castelletto · Piazzetta", 4, {9517.36f, 31.98f, -7381.59f}}, /* type4_parking_area_084 */
+    {"Castelletto · Spiaggia", 4, {9777.06f, 11.07f, -7939.28f}}, /* type4_parking_area_092 */
+    {"Castelletto · Molo", 4, {10048.20f, 16.02f, -7586.43f}}, /* type4_parking_area_094 */
+    {"San Giovanni · Torre Grossa", 4, {5128.29f, 172.25f, -3174.48f}}, /* type4_parking_area_097 */
+    {"San Giovanni · Gelateria", 4, {5061.82f, 152.16f, -3992.55f}}, /* type4_parking_area_100 */
+    {"San Giovanni · Duomo", 4, {5247.59f, 172.55f, -3290.51f}}, /* type4_parking_area_101 */
+    {"Sisteron · Lycée", 4, {-3406.61f, 84.64f, -2421.93f}}, /* type4_parking_area_108 */
+    {"Sisteron · Place de la République", 4, {-3639.54f, 68.86f, -1912.87f}}, /* type4_parking_area_112 */
+    {"San Giovanni · Piazza del Popolo", 4, {5364.11f, 172.55f, -3329.87f}}, /* type5_parking_area_000 */
+    {"San Giovanni · Museo", 4, {5491.96f, 166.95f, -3318.04f}}, /* type5_parking_area_001 */
+    {"Nizza · Quai des Docks", 4, {793.21f, 2.17f, -5816.79f}}, /* type6_parking_area_000 */
+    {"Nizza · Plage de la Réserve", 4, {902.85f, 3.42f, -5619.13f}}, /* type6_parking_area_001 */
+    {"Nizza · Phare du Port", 4, {710.98f, 8.75f, -6140.88f}}, /* type6_parking_area_002 */
+    {"Nizza · Aéroport", 4, {-1527.69f, 3.25f, -6334.29f}}, /* type6_parking_area_013 */
+    {"Nizza · Arénas", 4, {-1419.71f, 3.25f, -6266.01f}}, /* type6_parking_area_016 */
+    {"Nizza · Promenade des Anglais", 4, {-911.67f, 2.57f, -5970.44f}}, /* type6_parking_area_018 */
+    {"Nizza · Place Masséna", 4, {-535.77f, 5.61f, -5678.74f}}, /* type6_parking_area_020 */
+    {"Nizza · Magnan", 4, {-1151.79f, 5.43f, -6017.86f}}, /* type6_parking_area_022 */
+    {"Nizza · Hôtel Negresco", 4, {-994.45f, 2.94f, -6084.06f}}, /* type6_parking_area_024 */
+    {"Nizza · Plage Beau Rivage", 4, {-806.85f, 2.62f, -6045.61f}}, /* type6_parking_area_028 */
+    {"Nizza · Fabron", 4, {-1255.19f, 3.26f, -6177.20f}}, /* type6_parking_area_030 */
+    {"Nizza · Cours Saleya", 4, {-296.48f, 3.11f, -5991.11f}}, /* type6_parking_area_033 */
+    {"Nizza · Jardin Albert Ier", 4, {-563.64f, 3.00f, -5860.16f}}, /* type6_parking_area_036 */
+    {"Nizza · Vieux Nice", 4, {-231.06f, 5.88f, -5737.94f}}, /* type6_parking_area_040 */
+    {"San Giovanni · Villa dei Cipressi", 4, {4594.19f, 132.77f, -4072.79f}}, /* type6_parking_area_046 */
+    {"Nizza · Opéra", 4, {-171.54f, 3.43f, -5982.75f}}, /* type6_parking_area_052 */
+    {"Bei Horizon Festival · Passo", 2, {5380.98f, 192.00f, -8550.96f}}, /* race_trigger_zone_rt29 */
+    {"Castelletto · Torre Saracena", 2, {7575.96f, 122.00f, -8477.96f}}, /* race_trigger_zone_rt30 */
+    {"Castelletto · Grotta Azzurra", 2, {8763.96f, 50.00f, -8155.96f}}, /* race_trigger_zone_rt31 */
+    {"Horizon Festival · Campeggio Le Rose", 2, {6319.98f, 164.00f, -8324.96f}}, /* race_trigger_zone_rt33 */
+    {"Castelletto · Limoneto", 2, {9971.96f, 90.00f, -6957.96f}}, /* race_trigger_zone_rt34 */
+    {"Castelletto · Hotel Bellavista", 2, {8869.96f, 96.00f, -6815.96f}}, /* race_trigger_zone_rt35 */
+    {"Castelletto · Faro", 2, {9220.96f, 59.00f, -6958.96f}}, /* race_trigger_zone_rt37 */
+    {"Horizon Festival · Villa Serena", 2, {5939.98f, 126.00f, -6863.96f}}, /* race_trigger_zone_rt40 */
+    {"Bei Horizon Festival · Cava", 2, {3845.98f, 125.00f, -7846.96f}}, /* race_trigger_zone_rt41 */
+    {"Horizon Festival · Fattoria del Sole", 2, {7111.96f, 138.00f, -6741.96f}}, /* race_trigger_zone_rt42 */
+    {"Bei Horizon Festival · Guado", 2, {3573.98f, 49.00f, -8142.96f}}, /* race_trigger_zone_rt45 */
+    {"Bei Horizon Festival · Crinale", 2, {5868.98f, 190.00f, -8382.96f}}, /* race_trigger_zone_rt48 */
+    {"Horizon Festival · Borgo San Pietro", 2, {5410.98f, 139.00f, -6873.96f}}, /* race_trigger_zone_rt49 */
+    {"Castelletto · Villa Rufolo", 2, {8439.96f, 127.00f, -6741.96f}}, /* race_trigger_zone_rt50 */
+    {"Castelletto · Belvedere", 2, {9548.96f, 152.00f, -6401.98f}}, /* race_trigger_zone_rt52 */
+    {"Horizon Festival · Pineta", 2, {6805.96f, 140.00f, -8195.96f}}, /* race_trigger_zone_rt55 */
+    {"Bei Horizon Festival · Rifugio", 2, {4960.98f, 202.00f, -8614.96f}}, /* race_trigger_zone_rt56 */
+    {"Castelletto · Baia", 2, {8418.79f, 100.87f, -8307.25f}}, /* race_trigger_zone_rt88 */
+    {"Horizon Festival · Autodromo", 2, {4922.98f, 163.00f, -7128.96f}}, /* race_trigger_zone_rt91 */
+    {"Saint Martin · Moulin à Huile", 2, {1569.99f, 102.00f, -4189.98f}}, /* race_trigger_zone_rt92 */
+    {"Bei Horizon Festival · Casa Colonica", 2, {3388.98f, 110.00f, -7426.96f}}, /* race_trigger_zone_rt93 */
+    {"Horizon Festival · Castello Nero", 2, {7051.96f, 119.00f, -6435.98f}}, /* race_trigger_zone_rt94 */
+    {"Montellino · Uliveto", 2, {8609.88f, 106.45f, -5170.40f}}, /* race_trigger_zone_rt95 */
+    {"Bei Nizza · Corniche Basse", 2, {2517.99f, 25.00f, -7086.96f}}, /* race_trigger_zone_rt100 */
+    {"Montellino · Fattoria Bellavista", 2, {8869.71f, 85.70f, -4061.20f}}, /* race_trigger_zone_rt146 */
+    {"Montellino · Cantina Vecchia", 2, {8397.82f, 102.28f, -3659.04f}}, /* race_trigger_zone_rt162 */
+    {"Castelletto · Santuario", 2, {9333.18f, 157.79f, -6170.08f}}, /* race_trigger_zone_rt243 */
+    {"Saint Martin · Place de l'Église", 2, {2273.82f, 130.56f, -3145.21f}}, /* race_trigger_zone_rt381 */
+    {"Montellino · Mulino", 2, {7988.23f, 99.86f, -2607.25f}}, /* race_trigger_zone_rt1141 */
+    {"Montellino · Castello di Valle", 2, {9956.89f, 133.74f, -833.79f}}, /* race_trigger_zone_rt1142 */
+    {"Montellino · Belvedere Est", 2, {10734.29f, 156.51f, -4466.86f}}, /* race_trigger_zone_rt1151 */
+    {"Castelletto · Monte Alto", 2, {10328.69f, 188.51f, -5856.14f}}, /* race_trigger_zone_rt1301 */
+    {"Saint Martin · Boulangerie", 2, {2321.46f, 142.01f, -3636.46f}}, /* race_trigger_zone_rt1381 */
+    {"Saint Martin · Belvédère", 2, {2213.75f, 141.87f, -2454.75f}}, /* race_trigger_zone_rt1382 */
+    {"Saint Martin · Ferme des Oliviers", 2, {304.98f, 83.80f, -3566.55f}}, /* race_trigger_zone_rt1442 */
+    {"Montellino · Abbazia", 2, {9931.36f, 194.17f, -4954.89f}}, /* race_trigger_zone_rt2121 */
+    {"Montellino · Ponte Vecchio", 2, {10000.65f, 122.54f, -1342.52f}}, /* race_trigger_zone_rt2151 */
+    {"Horizon Festival · Officina Rossi", 2, {7079.51f, 110.60f, -5296.46f}}, /* race_trigger_zone_rt2221 */
+    {"Castelletto · Il Gabbiano", 2, {8593.95f, 106.69f, -5699.38f}}, /* race_trigger_zone_rt2231 */
+    {"Castelletto · Scalinata", 2, {9773.37f, 173.07f, -5884.93f}}, /* race_trigger_zone_rt2261 */
+    {"Saint Martin · Chapelle Saint-Roch", 2, {1776.32f, 142.92f, -2726.76f}}, /* race_trigger_zone_rt2381 */
+    {"Saint Martin · Lavoir", 2, {1385.34f, 100.47f, -3790.66f}}, /* race_trigger_zone_rt2382 */
+    {"Bei Nizza · Plage des Pêcheurs", 2, {-3421.57f, 1.96f, -5836.41f}}, /* race_trigger_zone_rt3000 */
+    {"Bei Nizza · Pointe Rouge", 2, {-4024.45f, 6.44f, -5739.03f}}, /* race_trigger_zone_rt3001 */
+    {"Bei Nizza · Camping Les Pins", 2, {-3510.32f, 1.94f, -6187.02f}}, /* race_trigger_zone_rt3002 */
+    {"Bei Nizza · Cap Ouest", 2, {-3668.24f, 2.00f, -6601.66f}}, /* race_trigger_zone_rt3005 */
+    {"Saint Martin · Col de Braus", 2, {618.97f, 110.57f, -1418.28f}}, /* race_trigger_zone_rt3020 */
+    {"Alpes de Haute · Lac Bleu", 2, {133.53f, 110.29f, -1162.75f}}, /* race_trigger_zone_rt3021 */
+    {"Alpes de Haute · Refuge", 2, {300.63f, 110.29f, -1604.70f}}, /* race_trigger_zone_rt3022 */
+    {"Alpes de Haute · Col des Lauzes", 2, {446.59f, 133.53f, -886.00f}}, /* race_trigger_zone_rt3023 */
+    {"Alpes de Haute · Fromagerie", 2, {-142.85f, 110.29f, -1421.49f}}, /* race_trigger_zone_rt3024 */
+    {"Montellino · Stazione", 2, {7346.61f, 77.97f, -1338.24f}}, /* race_trigger_zone_rt3030 */
+    {"Montellino · Trattoria da Gino", 2, {7723.44f, 76.71f, -1712.26f}}, /* race_trigger_zone_rt3031 */
+    {"Montellino · Campo Sportivo", 2, {7012.09f, 82.62f, -1807.31f}}, /* race_trigger_zone_rt3032 */
+    {"Montellino · Mercato", 2, {7359.98f, 97.80f, -1668.19f}}, /* race_trigger_zone_rt3033 */
+    {"Montellino · Vigneti", 2, {7324.55f, 87.83f, -2106.24f}}, /* race_trigger_zone_rt3034 */
+    {"Saint Martin · Mairie", 2, {1960.90f, 128.63f, -3471.53f}}, /* race_trigger_zone_rt3040 */
+    {"Saint Martin · Domaine Viala", 2, {1236.38f, 105.95f, -3425.97f}}, /* race_trigger_zone_rt3042 */
+    {"Saint Martin · Fontaine", 2, {1620.83f, 118.79f, -3210.13f}}, /* race_trigger_zone_rt3044 */
+    {"Montellino · Podere Rosso", 2, {8794.17f, 91.18f, -4477.66f}}, /* race_trigger_zone_rt3050 */
+    {"Montellino · Frantoio", 2, {8281.02f, 87.87f, -4269.39f}}, /* race_trigger_zone_rt3051 */
+    {"Montellino · Cappella", 2, {8991.14f, 144.40f, -5017.83f}}, /* race_trigger_zone_rt4151 */
+    {"Montellino · Tenuta Sole", 2, {8686.86f, 96.50f, -3772.12f}}, /* race_trigger_zone_rt4161 */
+    {"Horizon Festival · La Quercia", 2, {7521.95f, 58.35f, -4367.11f}}, /* race_trigger_zone_rt4173 */
+    {"Montellino · Casale", 2, {7994.36f, 88.28f, -4162.09f}}, /* race_trigger_zone_rt4174 */
+    {"Saint Martin · Auberge du Col", 2, {1085.13f, 126.49f, -2691.73f}}, /* race_trigger_zone_rt4383 */
+    {"Alpes de Haute · Champs de Lavande", 2, {-1761.91f, 72.30f, -2861.21f}}, /* race_trigger_zone_rt8001 */
+    {"Saint Martin · Gorges du Loup", 2, {3439.87f, 130.37f, -2774.52f}}, /* race_trigger_zone_rt8002 */
+    {"Horizon Festival · Bar Sport", 2, {7381.22f, 98.18f, -5235.00f}}, /* race_trigger_zone_rt8005 */
+    {"Montellino · Lago", 2, {9368.31f, 51.74f, -1542.07f}}, /* race_trigger_zone_rt8006 */
+    {"Saint Martin · Pont Romain", 2, {3111.91f, 140.48f, -2580.12f}}, /* race_trigger_zone_rt9009 */
 };
 const unsigned ts_place_count = sizeof(ts_places) / sizeof(ts_places[0]);
 

@@ -48,7 +48,7 @@ Leitlinie: Alles soll sich anfühlen, als wäre es schon immer in Forza Horizon 
 | # | Idee | Warum nicht |
 |---|---|---|
 | 16 | Sichtbare Fahrgäste und Fußgänger | FH2 hat keine Fußgänger-Modelle und keine Animation dafür. Die Mod kann keine Figuren ins Spiel setzen. |
-| 17 | Lohn als echte Credits | Es ist kein sicherer Weg bekannt, das Spielkonto zu ändern. Die Mod bleibt bei der Firmenkasse. |
+| 17 | Lohn als echte Credits | Seit 0.13 gebaut: Lohn und Shop nur noch in echten Credits. Im Spiel ungetestet. |
 | 18 | Rushhour, Nachtschwärmer, Wetter | Uhrzeit und Wetter des Spiels kann die Mod nicht auslesen. Die PC-Uhr passt nicht zur Sonne im Spiel. |
 | 19 | Taxi-Schild auf dem Dach, Zielanzeige außen am Bus | Die Plattform kann keine Modelle oder Texturen ans Auto hängen. |
 | 20 | Echte gesprochene Dialoge wie bei Isha's Taxis | Dafür bräuchte es aufgenommene Stimmen. Die Mod hat nur die Windows-Stimmen (Schalter „Stimmen“). |
@@ -71,9 +71,9 @@ Leitlinie: Alles soll sich anfühlen, als wäre es schon immer in Forza Horizon 
 
 Aus der Vorschau der Mod (gleicher Zeichencode wie im Spiel, nur mit einer Ersatzschrift):
 
-![Edge](bilder/edge-vorschau.png) ![Tablet](bilder/tablet-vorschau.png)
+![Edge](images/edge-preview.png) ![Tablet](images/tablet-preview.png)
 
-![Tablet mit laufender Linie](bilder/tablet-linie.png)
+![Tablet mit laufender Linie](images/tablet-line.png)
 
 ## 0.5.1: Marvins Ideen vom 20.11.
 

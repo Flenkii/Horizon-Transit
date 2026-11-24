@@ -11,6 +11,8 @@
 #include <stdint.h>
 
 enum { TS_GAMEMAP_PICTURE = 1, TS_GAMEMAP_ROADS = 2 };
+/* 0.13: bumped when the map pieces look different (2: the nav's road types 5 and 6 are streets) */
+#define TS_MAP_VERSION 2
 
 /* builds the map (map.h) from the files' bytes; either may be NULL. Returns TS_GAMEMAP_* bits for what worked
    (0: nothing, the map stays as it was). */

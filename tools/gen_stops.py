@@ -28,12 +28,15 @@ each one is was matched by the game's own road-trip cutscene names in the game d
 (RoadTripLocations: ArriveAmalfi, ArriveMonti, ArriveSanGimi, ArriveGorbio, ArriveWNice, ArriveSisteron)
 and the destination pictures (DestinationHubs: Casteletto, Montellino, San_Giovanni, Saint_Martin,
 Nice_Massena, Sisteron). "alpesdehaute" has no road-trip entry and keeps a neutral name.
-That match is a reading of the data, not confirmed in game: docs/MACHBARKEIT.md says so too.
+That match is a reading of the data, not confirmed in game: docs/FEASIBILITY.md says so too.
 """
 import math
 import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from place_names import NAMES  # 0.13: made-up names instead of the numbers
 
 # kinds (src/core/stops.h)
 FESTIVAL, OUTPOST, SPOT, STOP, PARKING = 0, 1, 2, 3, 4
@@ -261,7 +264,7 @@ def main():
     out.append("")
     out.append("const TsPlace ts_places[] = {")
     for shown, kind, pos, source in places:
-        out.append('    {"%s", %d, {%.2ff, %.2ff, %.2ff}}, /* %s */' % (shown, kind, pos[0], pos[1], pos[2], source))
+        out.append('    {"%s", %d, {%.2ff, %.2ff, %.2ff}}, /* %s */' % (NAMES.get(shown, shown), kind, pos[0], pos[1], pos[2], source))
     out.append("};")
     out.append("const unsigned ts_place_count = sizeof(ts_places) / sizeof(ts_places[0]);")
     out.append("")

@@ -168,7 +168,7 @@ static void preview_rows(const TsCore *c, TsHud *h) {
         else snprintf(a, sizeof(a), "%s · %s", ts_passenger_name(o->passenger), ts_class_name(o->ride_class, c->german));
         snprintf(b, sizeof(b), "%s → %s", pk, km); /* to the pickup, then the ride */
         row(h, a, b, 2);
-        snprintf(b, sizeof(b), "%d €", o->pay);
+        snprintf(b, sizeof(b), "%s", ts_cr(c->german, o->pay));
         row(h, T(c, "Fahrt annehmen", "Accept ride"), b, 0);
     } else {
         int li = c->phone_sel < (int)ts_line_count ? c->phone_sel : 0;
@@ -187,7 +187,7 @@ static void preview_rows(const TsCore *c, TsHud *h) {
 
 void map_hud(const TsCore *c, TsHud *h) {
     if (!c->phone_open) return;
-    if (c->mode == TS_IDLE && c->map_view && (c->phone_tab == TS_TAB_RIDES ? c->phone_sel < c->offer_count : c->phone_tab == TS_TAB_BUS)) {
+    if (c->mode == TS_IDLE && c->map_view && (c->phone_tab == TS_TAB_RIDES ? c->offer_count && c->phone_sel == 0 : c->phone_tab == TS_TAB_BUS)) {
         /* the preview */
         h->map_on = 1, h->map_keys = TS_MAPKEYS_PREVIEW;
         h->row_count = 1; /* keep the app's heading */

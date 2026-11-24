@@ -64,17 +64,20 @@ void career_goal_check(TsCore *c) {
     int jobs = c->shift.jobs + c->shift.lines;
     if (jobs < TS_GOAL_JOBS || (float)c->shift.stars_sum < TS_GOAL_STARS * (float)c->shift.rated) return;
     c->shift.goal_done = 1;
-    c->wallet += TS_GOAL_BONUS;
-    c->shift.earned += TS_GOAL_BONUS;
+    int bonus = TS_GOAL_BONUS * c->cr_scale * (ts_has(c, TS_SHOP_PLANNER) ? 2 : 1); /* 0.10.1: the shift planner; 0.13: CR */
+    c->wallet += bonus;
+    c->shift.earned += bonus;
     char text[TS_TEXT];
-    snprintf(text, sizeof(text), "%d %s · %s %.0f+ · +%d €", TS_GOAL_JOBS, T(c, "Aufträge", "jobs"), T(c, "Schnitt", "average"),
-             (double)TS_GOAL_STARS, TS_GOAL_BONUS);
+    snprintf(text, sizeof(text), "%d %s · %s %.0f+ · +%s", TS_GOAL_JOBS, T(c, "Aufträge", "jobs"), T(c, "Schnitt", "average"),
+             (double)TS_GOAL_STARS, ts_cr(c->german, bonus));
     toast(c, TS_ICON_TROPHY, TS_SOUND_NOTIFY, T(c, "Tagesziel geschafft", "Day's goal reached"), text);
     event(c, TS_EV_SAVE, 0, 0, NULL, NULL);
 }
 
 void career_cancel(TsCore *c, int passenger_on_board) {
-    c->reputation = clampf(c->reputation - (passenger_on_board ? 4.0f : 1.0f), 0.0f, 100.0f);
+    float loss = passenger_on_board ? 4.0f : 1.0f;
+    if (ts_has(c, TS_SHOP_INSURANCE)) loss *= 0.5f; /* 0.13: the insurance */
+    c->reputation = clampf(c->reputation - loss, 0.0f, 100.0f);
 }
 
 /* 0.8: the shift also starts by itself with the first ride or line (like going online in a ride app), so push
@@ -98,6 +101,7 @@ void ts_shift_toggle(TsCore *c) {
         toast(c, TS_ICON_ROADS, TS_SOUND_NOTIFY, T(c, "Schicht beginnt", "Shift started"), goal);
         return;
     }
+    c->offer_count = 0; /* 0.13: offline: no more requests */
     /* the day's statement: 0.6 a card with the review (the pop-ups only without the ride panel) */
     if (c->cards_on) {
         card_shift(c);
@@ -108,15 +112,15 @@ void ts_shift_toggle(TsCore *c) {
     char title[TS_TEXT], text[TS_TEXT], km[24], time[16];
     format_km(c, km, sizeof(km), (float)((c->km_total - c->shift.km_start) * 1000.0));
     format_time(time, sizeof(time), (c->t - c->shift.start_t) / 60.0); /* h:mm */
-    snprintf(title, sizeof(title), "%s · %lld €", T(c, "Feierabend", "End of shift"), c->shift.earned);
+    snprintf(title, sizeof(title), "%s · %s", T(c, "Feierabend", "End of shift"), ts_cr(c->german, c->shift.earned));
     if (c->shift.rated)
         snprintf(text, sizeof(text), "%d %s · %d %s · %s · %s h · %.1f %s", c->shift.jobs, T(c, "Fahrten", "rides"), c->shift.lines,
                  T(c, "Linien", "lines"), km, time, (double)c->shift.stars_sum / c->shift.rated, T(c, "Sterne", "stars"));
     else snprintf(text, sizeof(text), "%s · %s · %s h", T(c, "Heute keine Aufträge", "No jobs today"), km, time);
     toast(c, TS_ICON_TROPHY, TS_SOUND_NOTIFY, title, text);
     if (c->shift.rated) {
-        snprintf(text, sizeof(text), "%s %lld € · %s %d € · %s %+.0f", T(c, "Trinkgeld", "Tips"), c->shift.tips,
-                 T(c, "Beste Fahrt", "Best job"), c->shift.best_pay, T(c, "Ruf", "Reputation"),
+        snprintf(text, sizeof(text), "%s %s · %s %s · %s %+.0f", T(c, "Trinkgeld", "Tips"), ts_cr(c->german, c->shift.tips),
+                 T(c, "Beste Fahrt", "Best job"), ts_cr(c->german, c->shift.best_pay), T(c, "Ruf", "Reputation"),
                  (double)(c->reputation - c->shift.rep_start));
         event(c, TS_EV_FEED, 0, 0, T(c, "Abrechnung", "Statement"), text);
     }
@@ -129,7 +133,7 @@ void career_account_rows(const TsCore *c, TsHud *h) {
     if (c->shift.on) {
         char time[16];
         format_time(time, sizeof(time), (c->t - c->shift.start_t) / 60.0);
-        snprintf(b, sizeof(b), "%s h · %lld €", time, c->shift.earned);
+        snprintf(b, sizeof(b), "%s h · %s", time, ts_cr(c->german, c->shift.earned));
         row(h, T(c, "Feierabend machen", "End shift"), b, 0);
     } else {
         row(h, T(c, "Schicht beginnen", "Start shift"), "", 0);
@@ -137,14 +141,17 @@ void career_account_rows(const TsCore *c, TsHud *h) {
     snprintf(b, sizeof(b), "%d · %s", (int)(c->reputation + 0.5f), ts_rep_name(c));
     row(h, T(c, "Ruf", "Reputation"), b, 0);
     row_meter(h, c->reputation / 100.0f, 1);
-    snprintf(b, sizeof(b), "%lld €", c->wallet);
-    row(h, T(c, "Firmenkasse", "Company funds"), b, 0);
+    if (c->game_credits >= 0) ts_money_text(c, c->game_credits, b, sizeof(b)); /* 0.13: the game account */
+    else snprintf(b, sizeof(b), "…");
+    row(h, T(c, "Spielkonto", "Game account"), b, 0);
     {   /* 0.6: the driver's tier, the meter towards the next */
         char hint[40];
         market_tier_hint(c, hint, sizeof(hint));
+        char *cut = strstr(hint, c->german ? " Fahrten" : " more jobs"); /* the phone's row is narrow: "noch 4", "4 more" */
+        if (cut) snprintf(cut, sizeof(hint) - (size_t)(cut - hint), "%s", c->german ? "" : " more");
         if (hint[0]) snprintf(b, sizeof(b), "%s · %s", ts_tier_name(c->tier, c->german), hint);
         else snprintf(b, sizeof(b), "%s", ts_tier_name(c->tier, c->german));
-        row(h, T(c, "Fahrer-Stufe", "Driver tier"), b, 0);
+        row(h, T(c, "Stufe", "Tier"), b, 0);
         row_meter(h, market_tier_progress(c), 0);
     }
     snprintf(b, sizeof(b), "%d / %d", c->jobs_done, c->bus_lines_done);
@@ -162,10 +169,18 @@ void career_account_rows(const TsCore *c, TsHud *h) {
     if (timed) snprintf(p1, sizeof(p1), "%d%%", c->on_time_total * 100 / timed);
     if (wishes) snprintf(p2, sizeof(p2), "%d/%d", c->wishes_ok, wishes);
     if (c->shift.on && c->shift.rated)
-        snprintf(h->footer, sizeof(h->footer), "%s: %d %s · %.1f %s · %s %lld €", T(c, "Heute", "Today"), c->shift.jobs + c->shift.lines,
+        snprintf(h->footer, sizeof(h->footer), "%s: %d %s · %.1f %s · %s %s", T(c, "Heute", "Today"), c->shift.jobs + c->shift.lines,
                  T(c, "Aufträge", "jobs"), (double)c->shift.stars_sum / c->shift.rated, T(c, "Sterne", "stars"),
-                 T(c, "Trinkgeld", "tips"), c->shift.tips);
+                 T(c, "Trinkgeld", "tips"), ts_cr(c->german, c->shift.tips));
     else
-        snprintf(h->footer, sizeof(h->footer), "%s %lld € · %s %s · %s %s · %s %d €", T(c, "Trinkgeld", "Tips"), c->tips_total,
-                 T(c, "Pünktlich", "On time"), p1, T(c, "Wünsche", "Wishes"), p2, T(c, "Rekord", "Best"), c->best_pay);
+    {   /* 0.13: only what there is (it wrapped with a lone "CR" on the phone) */
+        char tip[24], best[24];
+        ts_money_text(c, c->tips_total, tip, sizeof(tip));
+        ts_money_text(c, c->best_pay, best, sizeof(best));
+        int n = snprintf(h->footer, sizeof(h->footer), "%s %s · %s %s", T(c, "Trinkgeld", "Tips"), tip, T(c, "Rekord", "Best"), best);
+        if (timed && n > 0 && (size_t)n < sizeof(h->footer))
+            n += snprintf(h->footer + n, sizeof(h->footer) - (size_t)n, " · %s %s", T(c, "Pünktlich", "On time"), p1);
+        if (wishes && n > 0 && (size_t)n < sizeof(h->footer))
+            snprintf(h->footer + n, sizeof(h->footer) - (size_t)n, " · %s %s", T(c, "Wünsche", "Wishes"), p2);
+    }
 }

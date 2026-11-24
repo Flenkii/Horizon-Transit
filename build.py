@@ -7,7 +7,7 @@ Braucht: pip install ziglang==0.15.2   (ein C-Compiler fuer Windows, ohne Visual
 import os, shutil, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-CORE = ["src/core/jobs.c", "src/core/stops_data.c", "src/core/cars_data.c", "src/core/lines.c", "src/core/phone_draw.c", "src/core/people.c", "src/core/career.c", "src/core/wishes.c", "src/core/timetable.c", "src/core/bus_sql.c", "src/core/shop.c", "src/core/doors.c", "src/core/service.c", "src/core/chimes.c", "src/core/talk.c", "src/core/market.c", "src/core/cards.c", "src/core/map.c", "src/core/mapview.c", "src/core/gamemap.c", "src/core/inflate.c", "src/core/bc7.c", "src/core/phone_anim.c"]
+CORE = ["src/core/jobs.c", "src/core/stops_data.c", "src/core/cars_data.c", "src/core/lines.c", "src/core/phone_draw.c", "src/core/people.c", "src/core/career.c", "src/core/wishes.c", "src/core/timetable.c", "src/core/bus_sql.c", "src/core/shop.c", "src/core/doors.c", "src/core/service.c", "src/core/chimes.c", "src/core/talk.c", "src/core/market.c", "src/core/cards.c", "src/core/map.c", "src/core/mapview.c", "src/core/gamemap.c", "src/core/inflate.c", "src/core/bc7.c", "src/core/phone_anim.c", "src/core/companion.c", "src/core/book.c"]
 
 
 def run(cmd):
@@ -63,8 +63,25 @@ def sounds_header():
         os.remove(old)
 
 
+def app_header():
+    """app/index.html (the phone app's page) as C text in src/app_html.h: the mod serves it at http://<pc>:8710/,
+    and the Android app (android/) carries the same file"""
+    data = open(os.path.join(ROOT, "app", "index.html"), "rb").read()
+    out = ["/* The phone app's page (app/index.html, built in by build.py: don't edit here). */",
+           "#ifndef TS_APP_HTML_H", "#define TS_APP_HTML_H", "static const char ts_app_html[] ="]
+    for line in data.split(b"\n"):
+        out.append('    "' + line.decode("utf-8").replace("\\", "\\\\").replace('"', '\\"') + '\\n"')
+    out += ["    ;", "#endif", ""]
+    text = "\n".join(out)
+    path = os.path.join(ROOT, "src", "app_html.h")
+    if not os.path.exists(path) or open(path, encoding="utf-8").read() != text:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+
+
 def main():
     po_header()
+    app_header()
     sounds_header()
     zig = [sys.executable, "-m", "ziglang", "cc"]
     os.makedirs(os.path.join(ROOT, "out"), exist_ok=True)
@@ -75,7 +92,7 @@ def main():
     run([exe])
     # 2. Die DLL fuer das Spiel (Windows x64)
     run(zig + ["-target", "x86_64-windows-gnu", "-shared", "-O2", "-std=c11", "-Wall", "-Wextra", "-Isrc/core", "-Isrc",
-               "src/mod.c", "src/phone_window.c", "src/voice.c"] + CORE + ["-luser32", "-lgdi32", "-lole32", "-o", "out/TransportSim.dll"])
+               "src/mod.c", "src/phone_window.c", "src/voice.c", "src/companion_net.c"] + CORE + ["-luser32", "-lgdi32", "-lole32", "-lws2_32", "-o", "out/TransportSim.dll"])
     for junk in ("out/mod.lib", "out/TransportSim.lib"):
         if os.path.exists(os.path.join(ROOT, junk)):
             os.remove(os.path.join(ROOT, junk))

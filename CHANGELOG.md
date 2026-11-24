@@ -2,6 +2,125 @@
 
 What changed for players, newest first. Every version is on the [Releases](../../releases) page.
 
+## 0.13.0
+
+Real game money only. The company funds are gone, everything runs on your credits. Plus a lot the phone app can do without the game, bus engine swaps and the missing roads on the map.
+
+- **Pay goes straight to your game account:** every ride, bus line, bonus and lost item pays real credits. The mod calls the game's own award function (`game+0x9E9120`), the same one gifts and rewards use. It raises your credits and "total earned" and saves the game.
+- **Everything in CR:** prices, pay, tips and bonuses are shown in CR, five times the old euro amounts (`[Credits] Scale=5` in the INI). A ride over 5 km brings about 6,000 to 8,000 CR.
+- **Shop with real credits:** you buy with your game account, through the game's own "spend credits" code (`game+0x564800`). The mod checks your balance first; if it's not enough, nothing is taken.
+- **9 new shop items:** water & snacks, dashcam, punctuality bonus, long-distance licence, hotspot radar, night surcharge (10 pm to 6 am, PC clock), bus air conditioning, billboards, insurance. 18 items now, each with its own effect.
+- **Safety:** the bytes of both game functions are checked before use. If they don't match, there are no credits and no shop, and the log says why. The platform backs up your save at every start.
+- **Game account on the phone:** top right, in Account, in the Shop and in the phone app.
+- **Fixed fare:** from pickup on, the ride panel shows the agreed price like Uber ("FARE"). Before, it counted up with the distance, which looked like fast driving paid more.
+- **Driving like a driver app:** offline you only see GO. After GO it says "Looking for rides …" and every few seconds one request comes in. Each waits 20 seconds for a yes, with a countdown. Accept or decline, otherwise the next one comes. Works standing still and with the phone open, more often at hotspots. The list of three rides to choose from is gone.
+- **Places with names:** instead of "Meeting point 4" or "Car park 7" all 131 places now have real names that fit where they are, e.g. "Place Garibaldi" or "Promenade des Anglais" in Nice, "Piazza della Cisterna" in San Giovanni, "Marina" in Castelletto. Made up; the positions are still the game's.
+- **New design "Pure Dark":** like the Uber app in dark mode. Nearly black, grey cards, white text, light buttons. 9 designs now, on the game phone and in the app.
+- **Pick lists:** settings with many values (Design, Device) open a list to pick from, on the game phone (Enter) and in the app, instead of clicking through.
+- **Map: missing roads.** The map now shows every road from the game files. Before, e.g. the festival's west access and the coast road near Castelletto were missing (they were only drawn as barely visible dirt tracks, and the GPS didn't know some of them). The GPS uses them now too. The app reloads its saved map pieces once for this.
+- **Bus engine swaps (experimental):** with "Bus in the Autoshow" on, the bus gets four engines under Upgrades > Conversion: 6.2L V8 (Corvette), 7.0L Hemi V8, 6.0L V12 (Enzo) and 5.2L V10 (Gallardo). Like other car swaps, but only through the mod's database questions; the database file stays untouched. Fool-proof: the four engines are copies of real conversion entries of other cars with the same number, so your save remembers an engine the game itself knows. Switch off, mod removed or online: the bus keeps a valid engine.
+- **Phone app without the game:**
+  - **Earnings** in Account like a driver app: the week as a bar per day, tap a day to see it, arrows for older weeks.
+  - **Ride book** with every ride and bus line: time, route, distance, duration, tip and car. The mod keeps it in `TransportSim-rides.txt` (the last 300), the app keeps it without the game.
+  - **Progress:** all tiers and what they need, the shop items still missing, the bus lines you've driven.
+  - **Timetables:** in the Bus tab, "Timetable" shows every stop with minutes from the start, "On the map" shows the line on the road.
+  - **GPS target:** tap the map, "Set as target". If the game runs, the GPS sets it at once (after a job again), otherwise at the next start. It switches off when you get there.
+  - **Versions:** the Options show small at the top which mod version and which app version you have.
+- **Game phone polish:** the tab highlight is a pill and no longer sticks out of the bar, long tab names get smaller instead of cut off, all amounts with thousands separators ("5,130 CR"), centred one-line footer, "Tier: Bronze · 10 to go" and the GO card fit. Arrow keys: at the bottom of a tab it wraps to the top instead of jumping to the next tab.
+- **App polish:** two lines for the target, ring lines say "Ring line via …", "10 rides to go", buy buttons in a row line up on the tablet, "5 %" and "CR" no longer wrap, a line of the hidden notice no longer flashes at the top edge. Fixed: with more than 8 designs the app would have cut off the design choice.
+- Phone app 0.13.0 (build 23). Install it over the old one and tap "Update"; the saved connection stays.
+
+## 0.12.0
+
+The game phone now looks like the phone app. Checked as pictures in all designs on phone, Edge and tablet.
+
+- **New header:** logo, name and your car on the left, your money as a glass pill on the right.
+- **Tab bar at the bottom:** floating, with icons (car, bus, map, person, bag, gear); the highlight glides along.
+- **Big page titles** with a small badge on the right (hotspot, "Bus ready", money).
+- **Ride requests** as big cards with the pay large on the right; the selected one gets a coloured edge and an "Accept ride" button with the pay.
+- **Account:** the shift as a GO card with a round GO button ("You're offline" / "You're online").
+- **Options:** on/off as Android-style switches.
+- **Job:** a sheet at the top with target, big speed and progress; short values as tiles side by side; "Cancel job" as a red button.
+- If the content doesn't fit, the page tightens up instead of cutting off.
+
+## 0.11.1
+
+The map in the phone app often stayed empty (dark blue) when zooming in.
+
+- **Map loads reliably:** the app fetched too many map pieces at once. With the game running the PC couldn't keep up, pieces timed out and the app briefly thought the PC was gone. Now at most 6 pieces are on the way at once, a slow piece no longer means "PC gone", and it's fetched again after 1.5 s.
+- **Always something to see:** under the sharp pieces the app first loads a coarser level, so zooming is never blank.
+- **Faster:** pieces already on the phone come from the phone instead of the PC. Phones with a very high resolution fetch only a quarter as many pieces.
+- **Hotspot zones:** zoomed in close they only tint the map slightly, so the roads stay readable.
+
+## 0.11.0
+
+A new look for the phone app and the game phone, inspired by Liquid Glass and Material You.
+
+- **Glass instead of boxes:** cards, tab bar, map buttons and notices are translucent glass with a light edge and shine, over a soft background in your design's colours that moves slowly.
+- **Floating tab bar:** a pill at the bottom, in landscape a bar on the left edge, with a gliding highlight.
+- **Big numbers, round shapes:** bold headings, big amounts, round buttons and Android-style switches for every on/off option.
+- **Like a ride-hailing app:** during a job the ride card slides over the map like a sheet, and a sign with minutes and distance floats on the map. "Accept ride" is a big pill with the pay.
+- **Swipe instead of tap:** "Cancel job" is a red slider, so a stray tap while driving can't cancel the job.
+- **GO button:** a big round GO button above the rides starts the shift; during the shift it shows what you earned today.
+- **Hotspots as zones:** on the map, hotspots glow as coloured zones with their surcharge (e.g. 1.5×), the redder, the more.
+- **Game phone in the same style:** glass cards, shiny selection, capsule tab bar and coloured lights in the background, also on tablet and Edge.
+
+## 0.10.4
+
+The phone app works without the game.
+
+- **Without the game:** the app shows the last state (money, account, shop, bus lines, options, design) with "Game not connected · as of …" at the top. Rides, starting a line, the shift and buying need the game.
+- **Change options without the game:** you can change every option in the app, the design switches at once. When the game runs again with the phone app on, the app reconnects by itself and the mod takes over the changes ("2 changes applied in the game").
+- **Map without the game:** the app keeps every map piece it got on the phone. Options > "Offline map" > "Save map" fetches the whole map at once (about 600 pieces). The pictures come from your own game files and stay on your phone only.
+- **Straight into the app:** with a saved PC, the app opens the tabs instead of the connect screen.
+- API: `/api/do?a=set&n=<row*16+value>`, `idx` and `choices` per option in `/api/state`, all designs (`themes`) in `/api/lines`.
+
+## 0.10.3
+
+The phone app uses the space in landscape and on tablets.
+
+- **Landscape:** the tab bar moves to the left edge and the header gets slimmer, leaving more height for the content.
+- **Job in landscape and on tablets:** the big map (navi or map) on the left; target, speed, mood, time, chat and cancel on the right.
+- **Lists in columns:** rides, shop, account, bus and options run in two or three columns from 700 pixels width.
+
+## 0.10.2
+
+Navigation in the phone app.
+
+- **Map right in the job:** after accepting a ride or bus line, the Job tab shows the map with route, target and car at the top, speed, time, mood and chat below.
+- **Navi or map:** top right on the map choose "Map" (north up) or "Navi" (turns with the car, a compass shows north). The app remembers the choice; Navi is the default.
+- **Chat no longer flickers:** the app only changes what changed; a new line fades in once. Buttons in shop, options and account are no longer rebuilt all the time (a tap sometimes got lost).
+- **Smooth:** car, rotation and the switch between map and navi glide instead of jumping. During a job the app updates five times a second.
+
+## 0.10.1
+
+Switch the phone app on from the game phone, design sync, all options, bigger shop and account in the app.
+
+- **"Connect phone app" on the game phone:** F9, right to Options, the new line at the top. Enter switches the app on; then the line shows the code and the PC's address below. No need for the mod menu any more (its switch stays).
+- **Design in sync:** change the design on the game phone and the app follows at once, including the colour of Android's status and navigation bars.
+- **All options in the app:** an Options tab with the same rows as the game phone. Tapping changes them in the game. The game phone got 7 new rows and scrolls.
+- **Bigger shop:** tip box (more tips), customer file (regulars more often), shift planner (double day's-goal bonus), ticket machine (more pay per km on bus lines). In the app: cards with icons, progress to the purchase, tap twice to buy.
+- **Account in the app:** money, tier with progress, reputation, rating, shift, statistics to fold open (distance, passengers, tips, 5 stars, best ride, on time, crashes, regulars …) and the logbook.
+- **Update:** install the new APK over the old one and tap "Update". Same app, same key, the saved connection stays.
+
+## 0.10.0
+
+Horizon Transit as a real phone app (prototype). All about it: [docs/PHONE-APP.md](docs/PHONE-APP.md) (German).
+
+- **Android app** `HorizonTransit.apk`: accept rides, start bus lines, answer passengers, cancel a job, shift on and off. Live: job, speed, speed limit, mood, time left, meter, chat, end card, money, reputation, tier.
+- **Map in the app:** drawn on the PC from your game files, with swipe and pinch zoom, car arrow, the way to the target along the roads, bus stops and hotspots.
+- **New switch "Phone app (Wi-Fi)"** in the mod menu, off at first. Switched on, the mod starts a small server in your home network (port 8710, discovery on 8711) and shows the address and pairing code in the mod menu and as a pop-up. Nothing works without the 4-digit code (`[PhoneApp] Code` in the INI).
+- The app finds the PC by itself. Without the app it also works in the phone's browser (iPhone too): `http://<address>:8710`.
+- New tests for the app's data and actions. `tests/app_demo.c` runs the server without the game, with a simulated car.
+
+## 0.9.2
+
+Language like Gripline, English file names.
+
+- **Language follows only the game:** Forza in German, the mod is German. English or any other game language, it's English. Before, in the first seconds after start (before the game picked its language) Windows' language counted; now it's English until then. The setting "Language" (Game, Deutsch, English) stays, default "Game".
+- **English file names:** docs/TESTANLEITUNG.md is now docs/TESTING.md, MACHBARKEIT.md is FEASIBILITY.md, IDEEN-1.0.md is IDEAS-1.0.md, ROADMAP_de.md is ROADMAP.md, docs/bilder is docs/images.
+- **Checked:** the whole test suite also ran with English forced, and every text of phone, speedo panel, maps, passenger messages and pop-ups was searched for German words: none found.
+
 ## 0.9.1
 
 A navigation view on the phone's map, and smooth animations everywhere.

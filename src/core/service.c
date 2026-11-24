@@ -1,7 +1,7 @@
-/* 0.5: the little things a real ride service has (ideas for 1.0, see docs/IDEEN-1.0.md):
+/* 0.5: the little things a real ride service has (ideas for 1.0, see docs/IDEAS-1.0.md):
 
-   - Push requests: while your shift runs and you drive around without a job, a request pops up now and then
-     ("New request: Lena, 400 m away"), like the real apps. The phone then shows that request first.
+   - Requests (0.13 like a driver app): after GO a request comes every few seconds, one at a time
+     ("New request: Lena, 400 m away"). It waits TS_REQUEST_S seconds for a yes, then the next one comes.
    - Lost items: now and then a passenger leaves something in the car and calls you a little later. Bring it
      back to where you dropped them off (GPS is set) for a thank-you and a little reputation.
    - The streak: jobs in a row with 4 or 5 stars. From the third one on, each pays a bonus (5 % per job, up to 20 %).
@@ -13,8 +13,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#define HAIL_FIRST_S 45.0  /* the first push request after the shift starts */
-#define HAIL_GAP_S 100.0   /* then every 100 to 160 s */
+#define HAIL_FIRST_S 6.0  /* 0.13: the first request after GO or after a job: 6 to 14 s */
+#define HAIL_GAP_S 12.0   /* 0.13: after a no or a missed one: 12 to 30 s (busy areas faster, quiet ones slower) */
 #define LOST_CHANCE 0.15f /* 0.8: was 0.07, too rare to ever see */
 #define LOST_REWARD 60
 
@@ -41,24 +41,29 @@ static const char *const call_en[] = {
 
 /* ------------------------------------------------------------------ push requests */
 
+void service_next_request(TsCore *c, int first) {
+    double wait = first ? HAIL_FIRST_S + 8.0 * random_unit(c) : HAIL_GAP_S + 18.0 * random_unit(c);
+    if (c->demand == 2) wait *= 0.6;
+    else if (c->demand == 0) wait *= 1.5;
+    c->hail_at = c->t + wait;
+}
+
 static void hail(TsCore *c) {
     ts_refresh_offers(c);
     if (!c->offer_count) return;
-    /* the nearest request is the one that "comes in" */
+    /* the nearest request is the one that comes in, alone, like in a driver app */
     int best = 0;
     for (int i = 1; i < c->offer_count; ++i)
         if (c->offers[i].pickup_m < c->offers[best].pickup_m) best = i;
-    if (best) {
-        TsOffer o = c->offers[best];
-        memmove(&c->offers[1], &c->offers[0], sizeof(TsOffer) * (size_t)best);
-        c->offers[0] = o;
-    }
-    c->offers_hailed = 1;
+    c->offers[0] = c->offers[best];
+    c->offer_count = 1;
+    c->req_until = c->t + TS_REQUEST_S;
+    c->phone_sel = 0;
     const TsOffer *o = &c->offers[0];
     char title[TS_TEXT], text[TS_TEXT], km[24];
     format_km(c, km, sizeof(km), o->pickup_m);
-    snprintf(title, sizeof(title), "%s · %d €", o->regular ? T(c, "Stammgast fragt nach dir", "A regular asks for you")
-                                                           : T(c, "Neue Anfrage", "New request"), o->pay);
+    snprintf(title, sizeof(title), "%s · %s", o->regular ? T(c, "Stammgast fragt nach dir", "A regular asks for you")
+                                                           : T(c, "Neue Anfrage", "New request"), ts_cr(c->german, o->pay));
     snprintf(text, sizeof(text), "%s, %s %s · %s %s", ts_passenger_name(o->passenger), km, T(c, "entfernt", "away"),
              T(c, "nach", "to"), ts_place_name(c, o->dest));
     toast(c, TS_ICON_ROADS, TS_SOUND_REQUEST, title, text);
@@ -95,11 +100,11 @@ static void lost_step(TsCore *c) {
     if (c->lost.state != 2) return;
     if (arrived_at(c, at) && c->speed < TS_STOPPED_SPEED) {
         c->lost.state = 0;
-        c->wallet += LOST_REWARD;
+        c->wallet += LOST_REWARD * c->cr_scale; /* 0.13: CR */
         c->reputation = clampf(c->reputation + 1.0f, 0.0f, 100.0f);
         c->nav_on = 0;
         c->nav_serial++;
-        snprintf(text, sizeof(text), "+%d € · %s +1", LOST_REWARD, T(c, "Ruf", "reputation"));
+        snprintf(text, sizeof(text), "+%s · %s +1", ts_cr(c->german, LOST_REWARD * c->cr_scale), T(c, "Ruf", "reputation"));
         toast(c, TS_ICON_PAYOUT, TS_SOUND_PAYOUT, T(c, "Fundsache zurückgegeben", "Lost item returned"), text);
         event(c, TS_EV_FEED, 0, 0, ts_passenger_name(c->lost.person), T(c, "Du bist ein Schatz, danke!", "You're a star, thank you!"));
         event(c, TS_EV_SAVE, 0, 0, NULL, NULL);
@@ -113,12 +118,12 @@ static void lost_step(TsCore *c) {
 
 void service_job_starts(TsCore *c) {
     career_auto_shift(c);
-    c->offers_hailed = 0;
     if (c->lost.state == 2) {
         toast(c, TS_ICON_NONE, 0, T(c, "Fundsache", "Lost item"), T(c, "Sie geht per Post zurück.", "It goes back by post."));
     }
     c->lost.state = 0;
     c->hail_at = 0.0;
+    c->req_until = 0.0;
 }
 
 void service_idle_step(TsCore *c) {
@@ -126,18 +131,25 @@ void service_idle_step(TsCore *c) {
         lost_step(c);
         return; /* no push requests while bringing something back */
     }
-    if (!c->shift.on || c->phone_open || !c->car_ok) {
-        if (!c->shift.on) c->hail_at = 0.0;
+    if (!c->shift.on || !c->car_ok) {
+        if (!c->shift.on) c->hail_at = 0.0, c->req_until = 0.0;
+        return;
+    }
+    if (c->offer_count && c->req_until > 0.0) { /* 0.13: a request waits for a yes */
+        if (c->t < c->req_until) return;
+        c->offer_count = 0, c->req_until = 0.0, c->phone_sel = 0;
+        toast(c, TS_ICON_NONE, 0, T(c, "Anfrage verpasst", "Request missed"), T(c, "Die nächste kommt gleich.", "The next one is on its way."));
+        service_next_request(c, 0);
         return;
     }
     if (c->hail_at <= 0.0) {
-        c->hail_at = c->t + HAIL_FIRST_S;
+        service_next_request(c, 1);
         return;
     }
-    /* standing still for a pause doesn't call anyone: you're driving around for work */
-    if (c->t >= c->hail_at && c->speed > 3.0f) {
+    /* 0.13: also while waiting at the roadside and with the phone open (Marvin: GO, then just wait) */
+    if (c->t >= c->hail_at) {
         hail(c);
-        c->hail_at = c->t + HAIL_GAP_S + 60.0 * random_unit(c);
+        c->hail_at = 0.0;
     }
 }
 
@@ -161,7 +173,7 @@ int service_streak(TsCore *c, int stars, int pay) {
 void service_streak_feed(TsCore *c, int bonus) {
     if (bonus <= 0) return;
     char text[TS_TEXT];
-    snprintf(text, sizeof(text), "%s %d · +%d € %s", T(c, "Serie", "Streak"), c->streak, bonus, T(c, "Bonus", "bonus"));
+    snprintf(text, sizeof(text), "%s %d · +%s %s", T(c, "Serie", "Streak"), c->streak, ts_cr(c->german, bonus), T(c, "Bonus", "bonus"));
     event(c, TS_EV_FEED, 0, 0, "Horizon Transit", text);
 }
 
@@ -226,7 +238,7 @@ static void log_rows(const TsCore *c, TsHud *h) {
         char a[64], b[40];
         if (e->bus) snprintf(a, sizeof(a), "%s %s · %s", T(c, "Linie", "Line"), ts_lines[e->who].number, ts_line_title(c, e->who));
         else snprintf(a, sizeof(a), "%s · %s", ts_passenger_name(e->who), ts_place_name(c, e->place));
-        snprintf(b, sizeof(b), "%d € · %d★", e->pay, e->stars);
+        snprintf(b, sizeof(b), "%s · %d★", ts_cr(c->german, e->pay), e->stars);
         det(h, TS_DET_PAIR, a, b);
     }
 }
@@ -235,15 +247,12 @@ void service_hud(const TsCore *c, TsHud *h) {
     h->meter = -1;
     char b[40];
     if (c->mode == TS_UBER && c->stage >= TS_UBER_TO_DEST) {
-        /* the meter runs with the road driven, up to the agreed fare (what's paid at the end also counts the mood) */
-        float part = c->job.trip_m > 1.0f ? c->trip_driven_m / c->job.trip_m : 1.0f;
-        if (part > 1.0f) part = 1.0f;
-        h->meter = (int)((float)c->job.pay * (0.15f + 0.85f * part) + 0.5f);
-        if (c->job.pool) { /* 0.6: a shared ride: what the first paid, and the one in the car now */
-            float own = (float)uber_pay(c->job.trip_m, 80.0f, c->job.ptype, c->job.pay_factor);
-            h->meter = c->pool_paid + (int)(own * (0.15f + 0.85f * part) + 0.5f);
-        }
-        snprintf(h->meter_label, sizeof(h->meter_label), "%s", T(c, "TAXAMETER", "FARE"));
+        /* 0.13: a fixed price agreed before the ride, like in a ride app (it used to count up with the road driven, which
+           looked like faster driving earns faster); what's paid at the end also counts the mood (the card shows it) */
+        h->meter = c->job.pay;
+        if (c->job.pool) /* 0.6: a shared ride: what the first paid, and the one in the car now */
+            h->meter = c->pool_paid + uber_pay(c->job.trip_m, 80.0f, c->job.ptype, c->job.pay_factor);
+        snprintf(h->meter_label, sizeof(h->meter_label), "%s", T(c, "FAHRPREIS", "FARE"));
     } else if (c->mode == TS_BUS) {
         h->meter = c->bus_pay;
         snprintf(h->meter_label, sizeof(h->meter_label), "%s", T(c, "KASSE", "FARES"));
@@ -275,7 +284,7 @@ void service_hud(const TsCore *c, TsHud *h) {
             det(h, TS_DET_STOP, ts_place_name(c, o->dest), b);
             char t[16];
             format_time(t, sizeof(t), o->limit_s);
-            snprintf(b, sizeof(b), "%s · %d €", t, o->pay);
+            snprintf(b, sizeof(b), "%s · %s", t, ts_cr(c->german, o->pay));
             det(h, TS_DET_PAIR, T(c, "Zeitlimit · Lohn", "Time limit · pay"), b);
         } else {
             snprintf(h->detail_title, sizeof(h->detail_title), "%s", T(c, "Fahrtenbuch", "Logbook"));

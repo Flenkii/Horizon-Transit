@@ -7,6 +7,24 @@
 #define BUCKETS                                                                                                        \
     "(SELECT CarId, CarBucket, BucketHero FROM Data_Car_Buckets UNION ALL SELECT 414, 21, 0 WHERE NOT EXISTS "        \
     "(SELECT 1 FROM Data_Car_Buckets WHERE CarId=414))"
+/* 0.13: engine swaps for the bus (Marvin): four engines more in the upgrade shop's "Conversion".
+   Fool-proof (Marvin: other players must not break their save): the four rows are copies of real swap rows of
+   other cars, with the same Id, only the car (Ordinal 414) and the level differ. The save keeps the engine's
+   Id, and that Id is in the game's own table: with the switch off, the mod gone or online, the bus still has a
+   known engine (the game's own row of that Id). The copies are only added where the game asks for a car's
+   list (a query with Ordinal), never where it looks an Id up (no row twice there).
+     444001  6.2L V8 (Corvette's, in Ordinal 444)    1276001  7.0L Hemi V8 (Ordinal 1276)
+     1496001 6.0L V12 (Enzo's, in Ordinal 1496)      1011001  5.2L V10 (Gallardo's, in Ordinal 1011) */
+#define ENGINES                                                                                                        \
+    "(SELECT * FROM List_UpgradeEngine UNION ALL SELECT Id, 414, CASE Id WHEN 444001 THEN 1 WHEN 1276001 THEN 2 "     \
+    "WHEN 1496001 THEN 3 ELSE 4 END, EngineID, IsStock, ManufacturerID, Price, MassDiff, WeightDistDiff, DragScale, "  \
+    "WindInstabilityScale FROM List_UpgradeEngine WHERE Id IN (444001, 1276001, 1496001, 1011001))"
+/* where the copies may go: a car's list, asked by its Ordinal, and no lookup by Id */
+static int engine_list_query(const char *sql) {
+    return strstr(sql, "Ordinal") && !strstr(sql, "List_UpgradeEngine.Id") && !strstr(sql, "List_UpgradeEngine.ID") &&
+           !strstr(sql, "List_UpgradeEngine.id");
+}
+
 #define IS_TRAFFIC "FROM TrafficCars WHERE CarId="
 #define NOT_BUS_TRAFFIC "FROM TrafficCars WHERE CarId<>414 AND CarId="
 
@@ -55,14 +73,20 @@ static int has_alias(const char *p) {
 
 int ts_bus_sql(const char *sql, char *out, size_t cap) {
     if (!sql || !out || !cap) return 0;
-    if (!strstr(sql, "Drivable_Data_Car") && !strstr(sql, "Data_Car_Buckets") && !strstr(sql, IS_TRAFFIC)) return 0;
+    if (!strstr(sql, "Drivable_Data_Car") && !strstr(sql, "Data_Car_Buckets") && !strstr(sql, IS_TRAFFIC) && !strstr(sql, "List_UpgradeEngine"))
+        return 0;
     const char *p = sql;
     while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') ++p;
-    if (strncasecmp(p, "CREATE", 6) == 0 || strncasecmp(p, "INSERT", 6) == 0 || strncasecmp(p, "UPDATE", 6) == 0 ||
-        strncasecmp(p, "DELETE", 6) == 0 || strncasecmp(p, "DROP", 4) == 0)
+    /* 0.13: the upgrade shop's list of parts is a view the game makes per car: it may see the swaps too */
+    int parts_view = strncasecmp(p, "CREATE", 6) == 0 && strstr(sql, "View_UpgradeParts AS") && strstr(sql, "List_UpgradeEngine") &&
+                     !strstr(sql, "INSERT") && !strstr(sql, "UPDATE") && !strstr(sql, "DELETE") && !strstr(sql, "DROP");
+    if (!parts_view && (strncasecmp(p, "CREATE", 6) == 0 || strncasecmp(p, "INSERT", 6) == 0 || strncasecmp(p, "UPDATE", 6) == 0 ||
+        strncasecmp(p, "DELETE", 6) == 0 || strncasecmp(p, "DROP", 4) == 0))
         return 0; /* only questions are changed, never the database */
     Out o = {out, cap, 0, 0};
     int changed = 0, after_from = 0; /* the previous word was FROM or JOIN */
+    int engines = engine_list_query(sql); /* 0.13 */
+    int from_list = 0;               /* 0.13: between FROM and WHERE (... FROM a, b: b is a table too) */
     char quote = 0;
     for (p = sql; *p;) {
         if (quote) { /* inside '...' or "..." or [...]: copied as it is */
@@ -86,6 +110,10 @@ int ts_bus_sql(const char *sql, char *out, size_t cap) {
                 put(&o, DRIVABLE, strlen(DRIVABLE));
                 if (!has_alias(p)) put(&o, " AS Drivable_Data_Car", 21);
                 changed = 1;
+            } else if (after_from && engines && word_is(w, "List_UpgradeEngine") && w[len] != '.') {
+                put(&o, ENGINES, strlen(ENGINES));
+                if (!has_alias(p)) put(&o, " AS List_UpgradeEngine", 22);
+                changed = 1;
             } else if (after_from && word_is(w, "Data_Car_Buckets") && w[len] != '.') {
                 put(&o, BUCKETS, strlen(BUCKETS));
                 if (!has_alias(p)) put(&o, " AS Data_Car_Buckets", 20);
@@ -100,9 +128,14 @@ int ts_bus_sql(const char *sql, char *out, size_t cap) {
                 put(&o, w, len);
             }
             after_from = word_is(w, "FROM") || word_is(w, "JOIN");
+            if (word_is(w, "FROM")) from_list = 1;
+            else if (word_is(w, "WHERE") || word_is(w, "ON") || word_is(w, "GROUP") || word_is(w, "ORDER") || word_is(w, "HAVING") ||
+                     word_is(w, "LIMIT") || word_is(w, "UNION") || word_is(w, "SELECT"))
+                from_list = 0;
             continue;
         }
-        if (!(*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')) after_from = 0;
+        if (!(*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')) after_from = *p == ',' && from_list;
+        if (*p == ')') from_list = 0;
         put(&o, p, 1);
         ++p;
     }

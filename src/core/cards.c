@@ -82,11 +82,11 @@ void card_ride(TsCore *c, int stars, int pay, int base, int bonus, int late) {
         fare += c->pool_fare, tip += c->pool_tip;
     }
     char v[24];
-    snprintf(v, sizeof(v), "%d €", fare);
+    snprintf(v, sizeof(v), "%s", ts_cr(c->german, fare));
     pair(&k, T(c, "Fahrpreis", "Fare"), v);
-    if (tip > 0) snprintf(v, sizeof(v), "+%d €", tip), pair(&k, T(c, "Trinkgeld", "Tip"), v);
-    else if (pay < base) snprintf(v, sizeof(v), "-%d €", base - pay), pair(&k, T(c, "Abzug", "Deduction"), v);
-    if (bonus > 0) snprintf(v, sizeof(v), "+%d €", bonus), pair(&k, T(c, "Serie", "Streak"), v);
+    if (tip > 0) snprintf(v, sizeof(v), "+%s", ts_cr(c->german, tip)), pair(&k, T(c, "Trinkgeld", "Tip"), v);
+    else if (pay < base) snprintf(v, sizeof(v), "-%s", ts_cr(c->german, base - pay)), pair(&k, T(c, "Abzug", "Deduction"), v);
+    if (bonus > 0) snprintf(v, sizeof(v), "+%s", ts_cr(c->german, bonus)), pair(&k, T(c, "Serie", "Streak"), v);
     pair(&k, T(c, "Ankunft", "Arrival"), late ? T(c, "zu spät", "late") : T(c, "pünktlich", "on time"));
     push(c, &k);
 }
@@ -107,10 +107,10 @@ void card_bus(TsCore *c, int stars, int pay, int base, int bonus) {
     char v[24];
     snprintf(v, sizeof(v), "%d", c->delivered);
     pair(&k, T(c, "Fahrgäste", "Passengers"), v);
-    snprintf(v, sizeof(v), "%d €", pay < base ? pay : base);
+    snprintf(v, sizeof(v), "%s", ts_cr(c->german, pay < base ? pay : base));
     pair(&k, T(c, "Fahrgeld", "Fares"), v);
-    if (pay > base) snprintf(v, sizeof(v), "+%d €", pay - base), pair(&k, T(c, "Trinkgeld", "Tips"), v);
-    if (bonus > 0) snprintf(v, sizeof(v), "+%d €", bonus), pair(&k, T(c, "Serie", "Streak"), v);
+    if (pay > base) snprintf(v, sizeof(v), "+%s", ts_cr(c->german, pay - base)), pair(&k, T(c, "Trinkgeld", "Tips"), v);
+    if (bonus > 0) snprintf(v, sizeof(v), "+%s", ts_cr(c->german, bonus)), pair(&k, T(c, "Serie", "Streak"), v);
     push(c, &k);
 }
 
@@ -136,11 +136,11 @@ void card_shift(TsCore *c) {
     }
     format_km(c, km, sizeof(km), (float)((c->km_total - c->shift.km_start) * 1000.0));
     pair(&k, T(c, "Strecke", "Distance"), km);
-    snprintf(v, sizeof(v), "%lld €", c->shift.tips);
+    snprintf(v, sizeof(v), "%s", ts_cr(c->german, c->shift.tips));
     pair(&k, T(c, "Trinkgeld", "Tips"), v);
     if (c->shift.rated) {
         float rep = c->reputation - c->shift.rep_start;
-        snprintf(k.note, sizeof(k.note), "%s %d € · %s %+.0f%s", T(c, "Beste Fahrt", "Best job"), c->shift.best_pay, T(c, "Ruf", "Reputation"),
+        snprintf(k.note, sizeof(k.note), "%s %s · %s %+.0f%s", T(c, "Beste Fahrt", "Best job"), ts_cr(c->german, c->shift.best_pay), T(c, "Ruf", "Reputation"),
                  (double)rep, c->shift.goal_done ? T(c, " · Tagesziel geschafft", " · day's goal reached") : "");
     } else {
         snprintf(k.note, sizeof(k.note), "%s", T(c, "Heute keine Aufträge. Morgen wieder!", "No jobs today. See you tomorrow!"));

@@ -149,8 +149,8 @@ msgid "Bus in the Autoshow"
 msgstr "Bus im Autohaus"
 
 msgctxt "row.BusInAutoshow.description"
-msgid "EXPERIMENTAL: makes the game's traffic bus (PG_BUS_14) buyable in the Autoshow, in the Ford Transit's group. Also works from the FH2MP launcher; the database file isn't changed. Don't buy or drive it online. A save backup is made."
-msgstr "EXPERIMENTELL: macht den Verkehrsbus des Spiels (PG_BUS_14) im Autohaus kaufbar, in der Gruppe des Ford Transit. Geht auch über den FH2MP-Launcher, die Datenbankdatei wird nicht verändert. Nicht online kaufen oder fahren. Ein Spielstand-Backup wird angelegt."
+msgid "EXPERIMENTAL: makes the game's traffic bus (PG_BUS_14) buyable in the Autoshow, in the Ford Transit's group. Also works from the FH2MP launcher; the database file isn't changed. Don't buy or drive it online. In Upgrades > Conversion it gets 4 engine swaps (6.2L V8, 7.0L Hemi V8, 6.0L V12, 5.2L V10). A swapped engine stays valid with this off or the mod removed. A save backup is made."
+msgstr "EXPERIMENTELL: macht den Verkehrsbus des Spiels (PG_BUS_14) im Autohaus kaufbar, in der Gruppe des Ford Transit. Geht auch über den FH2MP-Launcher, die Datenbankdatei wird nicht verändert. Nicht online kaufen oder fahren. Unter Tuning > Umbau bekommt er 4 Motortausche (6.2L V8, 7.0L Hemi V8, 6.0L V12, 5.2L V10). Ein getauschter Motor bleibt gültig, auch wenn das hier aus ist oder die Mod fehlt. Ein Spielstand-Backup wird angelegt."
 
 msgctxt "hotkey.Phone.label"
 msgid "Phone open/close"
@@ -177,8 +177,8 @@ msgid "Take rides and bus lines; account and rating."
 msgstr "Fahraufträge und Buslinien annehmen, Konto und Bewertung."
 
 msgctxt "mod.description"
-msgid "Horizon Transit - Your festival. Your route. Rides and bus lines with virtual passengers: phone on F9, GPS route, time limit, speed, passenger comfort and the company's funds."
-msgstr "Horizon Transit - Dein Festival. Deine Route. Fahrdienst und Buslinien mit virtuellen Fahrgästen: Handy mit F9, GPS-Route, Zeitlimit, Tempo, Kundenzufriedenheit und Firmenkasse."
+msgid "Horizon Transit - Your festival. Your route. Rides and bus lines with virtual passengers: phone on F9, GPS route, time limit, speed, passenger comfort and real game credits."
+msgstr "Horizon Transit - Dein Festival. Deine Route. Fahrdienst und Buslinien mit virtuellen Fahrgästen: Handy mit F9, GPS-Route, Zeitlimit, Tempo, Kundenzufriedenheit und echte Spiel-Credits."
 
 msgctxt "row.PassengerDoors.label"
 msgid "Passenger doors"
@@ -220,6 +220,14 @@ msgctxt "row.Sounds.choice.3"
 msgid "Loud"
 msgstr "Laut"
 
+msgctxt "row.PhoneApp.label"
+msgid "Phone app (Wi-Fi)"
+msgstr "Handy-App (WLAN)"
+
+msgctxt "row.PhoneApp.description"
+msgid "Horizon Transit on your real phone: rides, the map, bus lines and the chat, live. Install the Android app (HorizonTransit.apk), phone and PC in the same Wi-Fi. When switched on, the address and the pairing code show here. Windows asks once whether the game may use the network: allow it for private networks."
+msgstr "Horizon Transit auf deinem echten Handy: Fahrten, Karte, Buslinien und Chat, live. Installiere die Android-App (HorizonTransit.apk), Handy und PC im selben WLAN. Wenn eingeschaltet, stehen hier die Adresse und der Kopplungscode. Windows fragt einmal, ob das Spiel ins Netzwerk darf: für private Netzwerke erlauben."
+
 msgctxt "row.Replies.label"
 msgid "Answer passengers"
 msgstr "Fahrgästen antworten"
@@ -231,3 +239,7 @@ msgstr "Fahrgäste fragen dich manchmal etwas. Antworten mit B auf der Tastatur 
 msgctxt "row.PhoneStyle.choice.7"
 msgid "Pure"
 msgstr "Pur"
+
+msgctxt "row.PhoneStyle.choice.8"
+msgid "Pure Dark"
+msgstr "Pur Dunkel"

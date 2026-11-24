@@ -52,13 +52,14 @@ void wish_chip(const TsCore *c, char *out, size_t size);
 /* shop.c: what the company buys */
 void shop_apply(TsCore *c);        /* after loading or buying: the bus's seats */
 void shop_buy(TsCore *c, int item);
-void shop_rows(const TsCore *c, TsHud *h);
+int shop_rows(const TsCore *c, TsHud *h); /* returns the first item shown (0.10.1: it scrolls) */
 
 /* timetable.c: the bus line's timetable */
 void tt_start(TsCore *c);
 float tt_arrived(TsCore *c);          /* at stop c->stop_i: returns the delay in seconds (0 at the first stop) */
 void tt_chip(const TsCore *c, char *out, size_t size);
 float tt_line_minutes(const TsCore *c, int line);
+float tt_stop_minutes(const TsCore *c, int line, int stop); /* 0.13: from the first stop to this one (the plan) */
 
 /* jobs.c, 0.5 */
 int bus_direction(const TsCore *c, int line); /* 1: the line will run backwards */
@@ -69,9 +70,12 @@ void career_goal_check(TsCore *c);
 /* service.c (0.5): push requests on shift, lost items, the streak, the logbook, the taxi meter and the tablet's column */
 void service_idle_step(TsCore *c);
 void service_job_starts(TsCore *c);
+void service_next_request(TsCore *c, int first); /* 0.13: when the next request comes */
 int service_streak(TsCore *c, int stars, int pay); /* after a job: the streak's bonus (paid already), 0 = none */
 void service_streak_feed(TsCore *c, int bonus);
 void service_log(TsCore *c, int bus, int who, int place, int pay, int stars);
+void service_book(TsCore *c, int bus, int who, int from, int to, int pay, int tip, int stars, int late); /* 0.13: book.c */
+void service_target_step(TsCore *c);
 void service_maybe_lost(TsCore *c, int person, int place);
 void service_hud(const TsCore *c, TsHud *h);
 

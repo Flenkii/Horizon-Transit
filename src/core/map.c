@@ -480,7 +480,7 @@ static int straight(const float a[2], const float b[2], float *out, int max) {
     return 2;
 }
 
-int ts_map_route(const float a[2], const float b[2], float *out, int max) {
+static int route_locked(const float a[2], const float b[2], float *out, int max) {
     if (!ts_map_ok() || max < 2) return 0;
     int s = snap(cell_of(a)), t = snap(cell_of(b));
     if (!cache) cache = (Way *)calloc(CACHE, sizeof(Way));
@@ -534,4 +534,14 @@ int ts_map_route(const float a[2], const float b[2], float *out, int max) {
         memcpy(w->pts, out, sizeof(float) * 2 * (size_t)m);
     }
     return m;
+}
+
+/* 0.10: the phone on screen and the phone app (another thread) both ask for ways: one at a time */
+static volatile int route_busy;
+int ts_map_route(const float a[2], const float b[2], float *out, int max) {
+    while (__atomic_exchange_n(&route_busy, 1, __ATOMIC_ACQUIRE)) {
+    }
+    int n = route_locked(a, b, out, max);
+    __atomic_store_n(&route_busy, 0, __ATOMIC_RELEASE);
+    return n;
 }

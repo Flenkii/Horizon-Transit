@@ -16,7 +16,7 @@ Stand: 16.11.2026, Version 0.4.0. Grundlage sind 10 Ideen aus der Community vom 
 | Pause, Karte, Menü offen? | Plattform (`FH2_UI_ON_SCREEN`) | ja (Handy-Fenster wartet richtig) |
 | Echte Uhrzeit des PCs | Windows | ja |
 | **Uhrzeit und Wetter im Spiel** | nicht bekannt | **nein**, siehe Idee 5 |
-| Credits des Spielstands | nicht bekannt | **nein**, die Mod hat ihr eigenes Konto |
+| Credits des Spielstands | Gutschrift-Funktion des Spiels `game+0x9E9120` | **ja, seit 0.13** (alles Geld der Mod; im Spiel ungetestet) |
 
 ## Machbarkeit der 10 Ideen
 
@@ -95,7 +95,7 @@ Abschaltbar: „Ruf, Sonderfahrten, Wünsche“ im Mod-Menü. 5734 automatische 
 
 ## Stand 0.5.0: auf dem Weg zu 1.0 (gebaut, im Spiel noch ungetestet)
 
-25 Ideen gesammelt (Marvins Wünsche, Spielerwünsche aus dem Internet, eigene), jede gegen die Machbarkeit geprüft. 15 sind eingebaut, 10 gehen nicht oder würden die Mod überladen. Die ganze Liste mit Herkunft und Begründung: [IDEEN-1.0.md](IDEEN-1.0_de.md).
+25 Ideen gesammelt (Marvins Wünsche, Spielerwünsche aus dem Internet, eigene), jede gegen die Machbarkeit geprüft. 15 sind eingebaut, 10 gehen nicht oder würden die Mod überladen. Die ganze Liste mit Herkunft und Begründung: [IDEAS-1.0.md](IDEAS-1.0.md).
 
 | Bereich | Eingebaut in 0.5.0 |
 |---|---|

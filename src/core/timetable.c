@@ -36,6 +36,13 @@ float tt_line_minutes(const TsCore *c, int index) {
     return s / 60.0f;
 }
 
+float tt_stop_minutes(const TsCore *c, int index, int stop) {
+    const TsLine *line = &ts_lines[index];
+    float s = 0.0f;
+    for (unsigned i = 1; i <= (unsigned)stop && i < line->stop_count; ++i) s += leg_seconds(c, line, i);
+    return s / 60.0f;
+}
+
 float tt_arrived(TsCore *c) {
     if (c->stop_i == 0) {
         c->plan_t0 = c->t;

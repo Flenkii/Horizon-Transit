@@ -121,7 +121,10 @@ int ts_gamemap_roads(const uint8_t *nav, size_t size, float *seg, uint8_t *kind,
         const uint8_t *rec = nav + road_at + (size_t)r * 24;
         uint32_t cnt = rd32(rec + 8), type = rd32(rec + 12), end = rd32(rec + 16);
         if (cnt < 2 || end > list || cnt > end) continue;
-        uint8_t k = type == 4 ? TS_ROAD_STREET : type == 6 ? TS_ROAD_TRAIL : TS_ROAD_DIRT;
+        /* 0.13: types 5 and 6 are real roads too (the festival's entrance, Castelletto's coast road: Marvin's
+           screenshots against the game's map); before they were drawn as faint dirt tracks and the GPS left the 6s out.
+           For the motorway search they stay apart (TRAIL), so two of them side by side don't make a motorway. */
+        uint8_t k = type == 4 ? TS_ROAD_STREET : type == 5 || type == 6 ? TS_ROAD_TRAIL : TS_ROAD_DIRT;
         for (uint32_t i = end - cnt; i + 1 < end && n < max; ++i) {
             uint32_t a = rd32(nav + list_at + (size_t)i * 8), b = rd32(nav + list_at + (size_t)(i + 1) * 8);
             if (a >= nodes || b >= nodes) continue;
@@ -134,6 +137,8 @@ int ts_gamemap_roads(const uint8_t *nav, size_t size, float *seg, uint8_t *kind,
         }
     }
     find_motorways(seg, kind, road_of, n, (int)roads);
+    for (int i = 0; i < n; ++i)
+        if (kind[i] == TS_ROAD_TRAIL) kind[i] = TS_ROAD_STREET;
     free(road_of);
     return n;
 }

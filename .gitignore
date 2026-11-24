@@ -6,3 +6,7 @@ __pycache__/
 *.lib
 out/
 build/
+src/app_html.h
+android/release.p12
+android/tools/
+android/build/

@@ -1,0 +1,1473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0E1220">
+<title>Horizon Transit</title>
+<!-- Horizon Transit's phone app (0.10). The same page runs in the Android app and in a phone's browser (the mod
+     serves it at http://<pc>:8710/). It talks to the mod's little server in the home network: /api/state,
+     /api/do, /api/lines, /api/tile. Own code, no libraries. -->
+<style>
+:root {
+  --sel: #fff; --bg2: #0E1220;
+  --bg: #0E1220; --panel: #171C2C; --panel2: #1F2538; --line: #2A3148; --text: #F2F4FA; --dim: #9AA3BA; --dim2: #6B7390;
+  --a1: #FF2E7E; --a2: #FF8A3D; --good: #36D399; --warn: #FFC542; --bad: #FF4D5E; --blue: #5B9BFF;
+  --grad: linear-gradient(90deg, var(--a1), var(--a2));
+  --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px);
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: linear-gradient(var(--bg2), var(--bg)) fixed; color: var(--text);
+  font: 15px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; user-select: none; }
+button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+.app { position: fixed; inset: 0; display: flex; flex-direction: column; }
+header { padding: calc(10px + var(--safe-t)) 16px 8px; display: flex; align-items: center; gap: 12px; }
+.logo { width: 40px; height: 40px; border-radius: 11px; background: var(--grad); display: grid; place-items: center;
+  font-weight: 800; font-size: 24px; color: var(--sel); flex: none; }
+.title { flex: 1; min-width: 0; }
+.title b { display: block; font-size: 18px; }
+.title small { color: var(--dim); font-size: 12px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.money { font-weight: 700; font-size: 17px; text-align: right; }
+.money small { display: block; color: var(--dim); font-weight: 500; font-size: 11px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-right: 6px; vertical-align: 1px; }
+.dot.off { background: var(--bad); }
+.gap { height: 10px; }
+.clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+main { flex: 1; position: relative; overflow: hidden; }
+/* 0.10.4: without the game: the last state, and what waits for the game */
+.offbar { display: none; margin: 0 16px 6px; padding: 8px 12px; border-radius: 12px; background: var(--panel2); border: 1px solid var(--line); font-size: 13px; color: var(--dim); }
+.offbar.on { display: block; }
+.offbar b { color: var(--text); }
+.page { position: absolute; inset: 0; overflow-y: auto; padding: 4px 16px 16px; display: none; -webkit-overflow-scrolling: touch; }
+.page.on { display: block; }
+#p-map { padding: 0; overflow: hidden; }
+nav { display: flex; padding: 6px 4px calc(6px + var(--safe-b)); background: var(--navbg, var(--panel)); border-top: 1px solid var(--line); }
+nav button { flex: 1; min-width: 0; padding: 6px 0 4px; color: var(--dim); font-size: 10.5px; font-weight: 600; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+nav button svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+nav button.on { color: var(--text); }
+nav button.on svg { stroke: var(--a1); }
+nav button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 0.10.1: options, shop, account */
+.opt { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 14px; border-bottom: 1px solid var(--line); }
+.opt:last-child { border-bottom: 0; }
+.opt .v { flex: none; padding: 5px 11px; border-radius: 99px; background: var(--panel2); font-size: 13px; font-weight: 700; color: var(--text); }
+.opt .v.on { background: var(--grad); color: var(--sel); }
+.opt small { display: block; color: var(--dim); font-size: 12px; margin-top: 2px; }
+.list { padding: 0; overflow: hidden; }
+.code-big { font-size: 34px; font-weight: 800; letter-spacing: .25em; text-align: center; margin: 6px 0 2px; }
+.ico { width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center; background: var(--panel2); flex: none; }
+.ico svg { width: 24px; height: 24px; fill: none; stroke: var(--a1); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.item.bought { opacity: .8; }
+.item.bought .ico { background: var(--grad); }
+.item.bought .ico svg { stroke: var(--sel); }
+.price { font-weight: 800; font-size: 17px; white-space: nowrap; }
+.ok { color: var(--good); font-weight: 700; font-size: 13px; }
+.fold { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; }
+.fold i { font-style: normal; color: var(--dim); transition: transform .25s; }
+.fold.open i { transform: rotate(90deg); }
+.kv { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.kv span { color: var(--dim); }
+.kv:first-child { border-top: 0; }
+.card.hero { background: var(--grad); color: var(--sel); border: 0; }
+.hero .muted { color: inherit; opacity: .8; }
+h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 14px 2px 8px; font-weight: 700; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 10px; }
+.row { display: flex; align-items: center; gap: 10px; }
+.grow { flex: 1; min-width: 0; }
+.muted { color: var(--dim); font-size: 13px; }
+.ell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pay { font-size: 22px; font-weight: 800; }
+.tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: var(--panel2); color: var(--dim); margin-right: 4px; }
+.tag.hot { background: rgba(255,138,61,.18); color: var(--a2); }
+.tag.vip { background: rgba(255,197,66,.16); color: var(--warn); }
+.route { margin: 10px 0 12px; position: relative; padding-left: 20px; }
+.route::before { content: ""; position: absolute; left: 5px; top: 9px; bottom: 9px; width: 2px; background: var(--line); }
+.route div { position: relative; padding: 2px 0; }
+.route div::before { content: ""; position: absolute; left: -20px; top: 7px; width: 12px; height: 12px; border-radius: 50%; background: var(--good); }
+.route div.to::before { background: var(--bad); border-radius: 3px; }
+.btn { display: block; width: 100%; padding: 13px; border-radius: 13px; background: var(--grad); color: var(--sel); font-weight: 700; font-size: 15px; text-align: center; }
+.btn.ghost { background: var(--panel2); color: var(--text); }
+.btn.red { background: rgba(255,77,94,.16); color: var(--bad); }
+.btn:active { filter: brightness(1.15); transform: scale(.99); }
+.btn[disabled] { opacity: .45; }
+.empty { text-align: center; color: var(--dim); padding: 36px 16px; }
+.empty b { display: block; color: var(--text); font-size: 17px; margin-bottom: 6px; }
+.bar { height: 7px; border-radius: 99px; background: var(--panel2); overflow: hidden; margin-top: 6px; }
+.bar i { display: block; height: 100%; width: 0; background: var(--grad); border-radius: 99px; transition: width .4s; }
+.bar.q i { background: var(--good); }
+.bar.q.mid i { background: var(--warn); }
+.bar.q.low i { background: var(--bad); }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.stat b { display: block; font-size: 20px; }
+.stat span { color: var(--dim); font-size: 12px; }
+/* the job */
+.job-top { display: flex; gap: 14px; align-items: center; }
+.sign { width: 64px; height: 64px; border-radius: 50%; background: #fff; border: 7px solid #E2232F; color: #111; display: grid; place-items: center;
+  font-weight: 800; font-size: 22px; line-height: 1; flex: none; position: relative; }
+.sign small { position: absolute; bottom: 6px; left: 0; right: 0; text-align: center; font-size: 8px; font-weight: 700; }
+.sign.over { background: var(--warn); animation: flash .5s infinite alternate; }
+.sign.over2 { background: var(--bad); color: #fff; animation: flash .3s infinite alternate; }
+.sign.free { border-color: #fff; background: #fff; }
+.sign.free::after { content: ""; position: absolute; inset: 4px; border-radius: 50%;
+  background: repeating-linear-gradient(135deg, transparent 0 7px, #222 7px 9px); }
+@keyframes flash { to { filter: brightness(1.3); transform: scale(1.04); } }
+.speed { font-size: 40px; font-weight: 800; line-height: 1; }
+.speed small { font-size: 13px; color: var(--dim); font-weight: 600; margin-left: 4px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 99px; background: var(--panel2); font-size: 13px; font-weight: 600; margin: 8px 6px 0 0; }
+.chip.wish { background: rgba(91,155,255,.15); color: var(--blue); }
+.reply { border: 1px solid var(--blue); background: rgba(91,155,255,.12); }
+.reply q { display: block; font-style: italic; margin-bottom: 10px; }
+.feed { display: flex; flex-direction: column; gap: 6px; }
+.msg { max-width: 86%; padding: 8px 12px; border-radius: 14px 14px 14px 4px; background: var(--panel2); font-size: 14px; }
+.msg.new { animation: in .3s backwards; }
+.msg b { display: block; font-size: 11px; color: var(--dim); margin-bottom: 1px; }
+.msg.me { align-self: flex-end; border-radius: 14px 14px 4px 14px; background: rgba(54,211,153,.16); }
+.msg.s2 b { color: var(--a2); } .msg.s3 b { color: var(--warn); }
+@keyframes in { from { opacity: 0; transform: translateY(6px); } }
+.stops { margin: 6px 0 0; padding: 0; list-style: none; }
+.stops li { display: flex; gap: 10px; align-items: center; padding: 5px 0; color: var(--dim); font-size: 14px; }
+.stops li i { width: 22px; height: 22px; border-radius: 50%; background: var(--panel2); display: grid; place-items: center; font-style: normal; font-size: 11px; font-weight: 700; flex: none; }
+.stops li.done { opacity: .5; }
+.stops li.now { color: var(--text); font-weight: 700; }
+.stops li.now i { background: var(--grad); color: #fff; }
+/* the map */
+#map { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; background: #17263C; }
+.mapbox { position: absolute; inset: 0; }
+.jobmap { position: relative; height: 46vh; min-height: 220px; max-height: 420px; margin: 4px 0 12px; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); display: none; }
+.jobmap.on { display: block; }
+.mapbtns { position: absolute; right: 12px; top: 12px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.mapmode { display: flex; padding: 3px; border-radius: 12px; background: rgba(23,28,44,.92); border: 1px solid var(--line); }
+.mapmode button { width: auto; height: 34px; padding: 0 12px; border: 0; border-radius: 9px; font-size: 13px; font-weight: 700; color: #cdd3e4; background: none; }
+.mapmode button.on { background: var(--grad); color: var(--sel); }
+.compass { position: absolute; left: 12px; top: 44px; width: 40px; height: 40px; border-radius: 50%; background: rgba(23,28,44,.92); border: 1px solid var(--line); display: none; transition: opacity .3s; }
+.compass.on { display: block; }
+.compass svg { width: 100%; height: 100%; }
+.mapbtns > button { width: 44px; height: 44px; border-radius: 12px; background: rgba(23,28,44,.92); border: 1px solid var(--line); font-size: 20px; font-weight: 700; }
+.mapbtns > button.on { color: var(--blue); border-color: var(--blue); }
+.mapinfo { position: absolute; left: 12px; right: 68px; bottom: 12px; background: rgba(23,28,44,.94); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; display: none; }
+.mapinfo.on { display: block; }
+.scale { position: absolute; left: 12px; top: 12px; font-size: 11px; color: #cdd3e4; font-weight: 700; text-shadow: 0 1px 2px #000; }
+.scale i { display: block; height: 4px; border: 2px solid #cdd3e4; border-top: 0; margin-top: 2px; }
+/* connecting */
+.connect { position: fixed; inset: 0; background: var(--bg); z-index: 20; display: flex; flex-direction: column; padding: calc(40px + var(--safe-t)) 24px 24px; overflow-y: auto; }
+.connect.off { display: none; }
+.connect .logo { width: 72px; height: 72px; font-size: 42px; border-radius: 20px; margin-bottom: 18px; }
+.connect h1 { margin: 0 0 6px; font-size: 26px; }
+.connect p { color: var(--dim); margin: 0 0 18px; }
+.pc { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); margin-bottom: 8px; width: 100%; text-align: left; }
+.pc.sel { border-color: var(--a1); }
+input { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 13px 14px; width: 100%; outline: none; }
+input:focus { border-color: var(--a1); }
+.code { font-size: 28px; letter-spacing: .5em; text-align: center; font-weight: 800; }
+.err { color: var(--bad); font-size: 14px; min-height: 20px; margin: 8px 0; }
+.spin { width: 18px; height: 18px; border: 2px solid var(--line); border-top-color: var(--a1); border-radius: 50%; animation: sp 1s linear infinite; display: inline-block; vertical-align: -4px; margin-right: 8px; }
+@keyframes sp { to { transform: rotate(360deg); } }
+/* 0.13: a list to pick from (designs, phone, ...) instead of tapping through */
+.pick .card { padding: 14px 10px 10px; max-height: 72vh; overflow-y: auto; border-color: var(--rim); max-width: 520px; margin: 0 auto; }
+.pick h3 { margin: 2px 12px 10px; font-size: 17px; }
+.pick .ch { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 14px 12px; border-radius: 16px; background: none; border: 0; color: var(--text); font: inherit; font-size: 16px; }
+.pick .ch:active { background: var(--glass); }
+.pick .ch .rd { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--dim); flex: none; }
+.pick .ch.on .rd { border: 6px solid var(--a1); background: #fff; }
+.pick .ch.on { font-weight: 700; }
+/* 0.13: earnings (a week in bars), the ride book, timetables, progress */
+.wk { display: flex; align-items: center; gap: 8px; }
+.wk button { width: 36px; height: 36px; border-radius: 50%; background: var(--glass2); border: 1px solid var(--rim); color: var(--text); font-size: 18px; flex: none; }
+.wk button:disabled { opacity: .3; }
+.wk .grow { text-align: center; }
+.bars { display: flex; align-items: flex-end; gap: 6px; height: 120px; margin: 14px 0 4px; }
+.bars button { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; background: none; border: 0; color: var(--dim); font: inherit; font-size: 11px; padding: 0; min-width: 0; }
+.bars button i { display: block; width: 100%; max-width: 34px; border-radius: 8px 8px 4px 4px; background: var(--panel2); min-height: 4px; transition: height .4s var(--spring, ease); }
+.bars button.has i { background: var(--a1); opacity: .55; }
+.bars button.on i { opacity: 1; }
+.bars button.on { color: var(--text); font-weight: 700; }
+.chips3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+.chips3 div { background: var(--panel2); border-radius: 14px; padding: 9px 10px; min-width: 0; }
+.chips3 span { display: block; color: var(--dim); font-size: 11px; }
+.chips3 b { font-size: 15px; white-space: nowrap; }
+.ride { display: block; width: 100%; text-align: left; padding: 11px 0; border-top: 1px solid var(--line); background: none; border-left: 0; border-right: 0; border-bottom: 0; color: var(--text); font: inherit; }
+.ride .top { display: flex; gap: 10px; align-items: baseline; }
+.ride .top .grow { min-width: 0; }
+.ride small { color: var(--dim); font-size: 12px; }
+.ride .more { margin-top: 8px; display: none; }
+.ride.open .more { display: block; }
+.ride .more .kv { padding: 6px 0; font-size: 13px; }
+.day { color: var(--dim); font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin: 14px 0 2px; }
+.tt { margin-top: 10px; }
+.tt div { display: flex; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.tt div b { width: 66px; flex: none; white-space: nowrap; color: var(--dim); font-weight: 600; font-variant-numeric: tabular-nums; }
+.row2 { display: flex; gap: 8px; margin-top: 10px; }
+.row2 .btn { flex: 1; }
+.tier { display: flex; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.tier .ok { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; background: var(--panel2); flex: none; }
+.tier.done .ok { background: var(--a1); color: var(--sel); }
+/* the card after a ride */
+.done { position: fixed; inset: 0; z-index: 15; background: rgba(8,10,18,.72); display: none; align-items: flex-end; padding: 16px 16px calc(16px + var(--safe-b)); backdrop-filter: blur(6px); }
+.done.on { display: flex; animation: in .35s; }
+.done .card { width: 100%; padding: 20px; border-color: var(--a1); }
+.done .k { color: var(--a2); font-size: 12px; font-weight: 800; letter-spacing: .1em; }
+.done .m { font-size: 40px; font-weight: 800; margin: 6px 0; }
+.done .stars { font-size: 26px; color: var(--warn); letter-spacing: 2px; }
+.pairs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 14px 0; }
+.pairs div { background: var(--panel2); border-radius: 10px; padding: 8px 10px; }
+.pairs span { display: block; color: var(--dim); font-size: 11px; }
+.toast { position: fixed; left: 16px; right: 16px; top: calc(12px + var(--safe-t)); z-index: 30; background: var(--bg2); box-shadow: 0 8px 24px rgba(0,0,0,.35); border: 1px solid var(--a1);
+  border-radius: 14px; padding: 12px 14px; transform: translateY(calc(-100% - 40px - var(--safe-t))); transition: transform .3s; font-weight: 600; }
+.toast.on { transform: none; }
+/* ------------------------------------------------------------------ 0.11: the new look. Glass on a soft wallpaper made
+   from the design's own colours (like Liquid Glass), big rounded shapes and bold numbers (like Material You),
+   a floating tab bar with a sliding pill. The colours still come from the game phone's design. */
+:root { --glass: rgba(23,28,44,.62); --glass2: rgba(23,28,44,.78); --rim: rgba(255,255,255,.12); --shine: rgba(255,255,255,.14);
+  --blob1: rgba(255,46,126,.42); --blob2: rgba(255,138,61,.30); --blob3: rgba(91,155,255,.30); --pill: rgba(255,46,126,.18);
+  --spring: cubic-bezier(.3,1.35,.5,1); --navh: 76px; }
+html { background: var(--bg); }
+html, body { background-color: var(--bg); }
+body { background: transparent; }
+body::before { content: ""; position: fixed; inset: -25%; z-index: -1; pointer-events: none;
+  background: radial-gradient(38% 32% at 18% 12%, var(--blob1), transparent 72%), radial-gradient(42% 36% at 88% 34%, var(--blob2), transparent 72%),
+    radial-gradient(48% 40% at 28% 92%, var(--blob3), transparent 72%), var(--bg);
+  animation: drift 40s ease-in-out infinite alternate; }
+@keyframes drift { to { transform: translate(-5%, 4%) rotate(8deg) scale(1.06); } }
+header { padding: calc(12px + var(--safe-t)) 18px 10px; }
+.logo { border-radius: 14px; box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 6px 16px var(--pill); }
+.title b { font-size: 19px; letter-spacing: -.01em; }
+.money { padding: 7px 14px; border-radius: 18px; background: var(--glass); border: 1px solid var(--rim); box-shadow: inset 0 1px 0 var(--shine);
+  -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%); font-variant-numeric: tabular-nums; }
+.page { padding: 4px 16px calc(var(--navh) + 26px + var(--safe-b)); }
+.page.on { animation: pagein .35s var(--spring); }
+@keyframes pagein { from { opacity: 0; transform: translateY(10px) scale(.99); } }
+h2 { font-size: 22px; letter-spacing: -.01em; text-transform: none; color: var(--text); font-weight: 800; margin: 18px 4px 10px; }
+.card, .stat, .offbar, .pc { background: var(--glass); border: 1px solid var(--rim); box-shadow: inset 0 1px 0 var(--shine), 0 10px 28px rgba(0,0,0,.16); }
+.card { border-radius: 26px; padding: 18px; margin-bottom: 12px; }
+.stat { border-radius: 22px; padding: 14px 16px; }
+.stat b { font-size: 26px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.stats { gap: 12px; margin-bottom: 12px; }
+.offbar { border-radius: 18px; }
+.card.hero { position: relative; overflow: hidden; border-radius: 30px; padding: 22px; box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 14px 34px var(--pill); }
+.card.hero::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(80% 60% at 15% 0%, rgba(255,255,255,.28), transparent 60%), radial-gradient(60% 50% at 100% 100%, rgba(0,0,0,.12), transparent 70%); }
+.card.hero > * { position: relative; z-index: 1; }
+.hero .pay { font-size: 40px !important; letter-spacing: -.03em; }
+.pay { font-size: 26px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.btn { border-radius: 999px; padding: 15px; font-size: 16px; box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 8px 20px var(--pill); transition: transform .25s var(--spring), filter .2s; }
+.btn:active { transform: scale(.96); }
+.btn.ghost { background: var(--glass2); border: 1px solid var(--rim); box-shadow: inset 0 1px 0 var(--shine); }
+.btn.red { box-shadow: none; }
+.tag { padding: 3px 10px; border-radius: 999px; }
+.bar { height: 8px; }
+.speed { font-size: 54px; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.ico { border-radius: 16px; background: var(--pill); }
+.msg { border-radius: 20px 20px 20px 6px; background: var(--glass2); border: 1px solid var(--rim); }
+.msg.me { border-radius: 20px 20px 6px 20px; }
+.opt { padding: 15px 18px; border-bottom-color: var(--rim); }
+.opt .v { padding: 6px 13px; }
+/* Material switch for On/Off rows */
+.sw { flex: none; width: 52px; height: 32px; border-radius: 16px; background: var(--panel2); border: 2px solid var(--dim2); position: relative; transition: background .25s, border-color .25s; }
+.sw::after { content: ""; position: absolute; top: 6px; left: 6px; width: 16px; height: 16px; border-radius: 50%; background: var(--dim);
+  transition: transform .3s var(--spring), width .3s var(--spring), height .3s var(--spring), top .3s var(--spring), background .25s; }
+.sw.on { background: var(--grad); border-color: transparent; }
+.sw.on::after { transform: translateX(20px); top: 2px; left: 2px; width: 24px; height: 24px; background: var(--sel); box-shadow: 0 2px 6px rgba(0,0,0,.25); }
+/* the floating tab bar */
+nav { position: absolute; left: 12px; right: 12px; bottom: calc(10px + var(--safe-b)); height: var(--navh); padding: 6px; border-radius: 32px; border: 1px solid var(--rim);
+  background: var(--glass2); -webkit-backdrop-filter: blur(26px) saturate(180%); backdrop-filter: blur(26px) saturate(180%);
+  box-shadow: inset 0 1px 0 var(--shine), 0 14px 36px rgba(0,0,0,.32); z-index: 6; }
+nav button { position: relative; z-index: 1; border-radius: 26px; padding: 8px 0 6px; justify-content: center; transition: color .25s; }
+nav button svg { transition: transform .35s var(--spring); }
+nav button.on svg { transform: translateY(-1px) scale(1.08); }
+nav .pill { position: absolute; z-index: 0; left: 0; top: 6px; height: calc(100% - 12px); border-radius: 26px; background: var(--pill);
+  box-shadow: inset 0 1px 0 var(--shine); transition: transform .45s var(--spring), width .45s var(--spring), height .45s var(--spring); }
+/* glass on the map */
+.mapbtns > button, .mapmode, .compass, .mapinfo { background: var(--glass2); border: 1px solid var(--rim); box-shadow: inset 0 1px 0 var(--shine), 0 6px 18px rgba(0,0,0,.25);
+  -webkit-backdrop-filter: blur(18px) saturate(170%); backdrop-filter: blur(18px) saturate(170%); color: var(--text); }
+.mapbtns > button { border-radius: 22px; width: 46px; height: 46px; }
+.mapmode { border-radius: 22px; padding: 4px; }
+.mapmode button { border-radius: 18px; color: var(--text); }
+.mapinfo { border-radius: 22px; bottom: calc(var(--navh) + 22px + var(--safe-b)); }
+.jobmap { border-radius: 28px; border: 1px solid var(--rim); box-shadow: 0 10px 28px rgba(0,0,0,.2); }
+.toast { background: var(--glass2); border: 1px solid var(--rim); border-radius: 22px; -webkit-backdrop-filter: blur(24px) saturate(170%); backdrop-filter: blur(24px) saturate(170%);
+  box-shadow: inset 0 1px 0 var(--shine), 0 12px 30px rgba(0,0,0,.3); transition: transform .45s var(--spring); }
+.done { background: rgba(0,0,0,.35); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.done .card { border-radius: 32px; background: var(--glass2); -webkit-backdrop-filter: blur(30px) saturate(170%); backdrop-filter: blur(30px) saturate(170%); }
+.done.on .card { animation: sheet .5s var(--spring); }
+@keyframes sheet { from { transform: translateY(40px) scale(.96); opacity: 0; } }
+.done .m { font-size: 52px; letter-spacing: -.03em; }
+.connect { background: transparent; }
+.connect .logo { border-radius: 24px; }
+input { background: var(--glass); border: 1px solid var(--rim); border-radius: 18px; }
+/* 0.11: like a ride app: during a job the first card is a sheet that slides up over the map (grab handle on top),
+   an ETA badge floats on the map, and "Annehmen" is a big pill with the price on it */
+@media (orientation: portrait) and (max-width: 699px) {
+#p-rides .jobmap.on + #rides-body > .card:first-child {
+  position: relative; z-index: 2; margin-top: -40px; border-radius: 30px 30px 26px 26px; background: var(--glass2);
+  -webkit-backdrop-filter: blur(28px) saturate(170%); backdrop-filter: blur(28px) saturate(170%); padding-top: 24px; animation: sheet .5s var(--spring); }
+#p-rides .jobmap.on + #rides-body > .card:first-child::before { content: ""; position: absolute; top: 9px; left: 50%; width: 38px; height: 5px; margin-left: -19px; border-radius: 3px; background: var(--dim2); }
+}
+.eta { position: absolute; left: 12px; bottom: 52px; z-index: 3; display: none; align-items: center; gap: 8px; padding: 7px 12px 7px 7px; border-radius: 20px;
+  background: var(--glass2); border: 1px solid var(--rim); box-shadow: inset 0 1px 0 var(--shine), 0 6px 18px rgba(0,0,0,.25);
+  -webkit-backdrop-filter: blur(18px) saturate(170%); backdrop-filter: blur(18px) saturate(170%); font-size: 13px; color: var(--text); }
+.eta.on { display: flex; }
+.eta b { background: var(--grad); color: var(--sel); border-radius: 14px; padding: 5px 9px; font-size: 15px; line-height: 1.05; text-align: center; font-variant-numeric: tabular-nums; }
+.eta b small { display: block; font-size: 10px; font-weight: 600; opacity: .85; }
+.btn.take { display: flex; align-items: center; justify-content: space-between; padding: 16px 22px; font-size: 17px; margin-top: 14px; }
+.btn.take span { font-variant-numeric: tabular-nums; opacity: .9; }
+/* 0.11: the GO card and the swipe slider */
+.gocard { display: flex; align-items: center; gap: 14px; }
+/* 0.13: online without a request: a radar; a request: its countdown along the top */
+.seek { display: flex; align-items: center; gap: 16px; }
+.seek b { font-size: 18px; display: block; }
+.radar { position: relative; width: 54px; height: 54px; flex: none; }
+.radar b { position: absolute; inset: 21px; border-radius: 50%; background: var(--a1); }
+.radar i { position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--a1); opacity: 0; animation: ping 2s ease-out infinite; }
+.radar i + i { animation-delay: 1s; }
+@keyframes ping { from { transform: scale(.25); opacity: .9; } to { transform: scale(1); opacity: 0; } }
+.req { position: relative; overflow: hidden; padding-top: 20px; }
+.req .timer { position: absolute; left: 0; right: 0; top: 0; height: 5px; background: var(--panel2); }
+.req .timer i { display: block; height: 100%; background: var(--a1); animation: tick linear forwards; }
+@keyframes tick { to { width: 0; } }
+.reqrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
+.reqrow .btn { width: auto; padding: 10px 20px; }
+.gocard b { font-size: 22px; font-weight: 800; letter-spacing: -.02em; display: block; }
+.gocard .live { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 5px rgba(54,211,153,.2); }
+.gobtn { flex: none; width: 76px; height: 76px; border-radius: 50%; background: var(--grad); color: var(--sel); font-size: 22px; font-weight: 900; letter-spacing: .02em;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 0 0 6px var(--pill), 0 10px 26px var(--pill); animation: gopulse 2.4s ease-in-out infinite; }
+.gobtn:active { transform: scale(.94); }
+.gobtn[disabled] { opacity: .45; animation: none; }
+@keyframes gopulse { 50% { box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 0 0 12px transparent, 0 10px 26px var(--pill); } }
+.slide { --k: 0; position: relative; height: 60px; border-radius: 30px; background: rgba(255,77,94,calc(.14 + var(--k) * .5)); border: 1px solid rgba(255,77,94,.35);
+  overflow: hidden; user-select: none; -webkit-user-select: none; touch-action: none; }
+.slide span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding-left: 50px; color: var(--bad); font-weight: 700; font-size: 15px; opacity: calc(1 - var(--k) * 1.4);
+  -webkit-mask: linear-gradient(90deg, transparent 0 60px, #000 110px); mask: linear-gradient(90deg, transparent 0 60px, #000 110px); }
+.slide i { position: absolute; left: 4px; top: 4px; width: 52px; height: 50px; border-radius: 26px; background: var(--bad); z-index: 1; cursor: grab;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 4px 12px rgba(255,77,94,.45); transition: transform .35s var(--spring); touch-action: none; }
+.slide i::after { content: "›››"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-style: normal; font-weight: 900; font-size: 18px; letter-spacing: -2px; }
+.slide.drag i { transition: none; }
+/* 0.10.3, 0.11: landscape: the tab bar floats on the left edge */
+@media (orientation: landscape) and (min-width: 560px) {
+  .app { padding-left: calc(98px + env(safe-area-inset-left, 0px)); }
+  header { padding: calc(8px + var(--safe-t)) 16px 4px; }
+  header .logo { width: 32px; height: 32px; font-size: 19px; border-radius: 10px; }
+  nav { left: calc(10px + env(safe-area-inset-left, 0px)); right: auto; top: calc(10px + var(--safe-t)); bottom: calc(10px + var(--safe-b)); width: 78px; height: auto;
+    flex-direction: column; justify-content: center; }
+  nav button { flex: 1 1 0; max-height: 74px; }
+  nav .pill { top: 0; left: 6px; width: calc(100% - 12px) !important; }
+  .page { padding-bottom: calc(16px + var(--safe-b)); }
+  .mapinfo { bottom: 12px; }
+}
+@media (min-width: 700px) {
+  .page.flow.on, #rides-body.flow { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); column-gap: 12px; grid-auto-rows: max-content; align-items: start; align-content: start; }
+  .flow > h2, .flow > p, .flow > .hero, .flow > .list, .flow > .stats, .flow > .btn, .flow > .empty { grid-column: 1 / -1; }
+  .flow > .stats { grid-template-columns: repeat(4, 1fr); }
+  .flow > .card.item { align-self: stretch; display: flex; flex-direction: column; } /* 0.13: buttons in a row line up */
+  .flow > .card.item > .gap, .flow > .card.item > .bar { margin-top: auto; }
+  .flow > .list { display: grid; grid-template-columns: 1fr 1fr; column-gap: 0; }
+  .flow > .list .opt:nth-child(odd) { border-right: 1px solid var(--line); }
+  .flow > .list .opt:nth-last-child(2):nth-child(odd) { border-bottom: 0; }
+  #p-rides.injob.on { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(300px, 1fr); gap: 14px; overflow: hidden; padding: 6px 16px calc(var(--navh) + 26px + var(--safe-b)); }
+  nav { left: 50%; right: auto; width: min(560px, calc(100% - 24px)); transform: translateX(-50%); }
+  #p-rides.injob .jobmap { height: auto; max-height: none; min-height: 0; margin: 0; }
+  #p-rides.injob .stats { grid-template-columns: 1fr 1fr; }
+  #p-rides.injob #rides-body { display: block; overflow-y: auto; min-height: 0; padding-right: 2px; }
+  .done .card { max-width: 480px; margin: 0 auto; }
+  .toast { max-width: 480px; margin: 0 auto; }
+  .connect { padding-left: max(24px, calc(50% - 240px)); padding-right: max(24px, calc(50% - 240px)); }
+}
+@media (orientation: landscape) and (min-width: 700px) {
+  #p-rides.injob.on { padding-bottom: 14px; }
+  nav { left: calc(10px + env(safe-area-inset-left, 0px)); width: 78px; transform: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">H</div>
+    <div class="title"><b>Horizon Transit</b><small id="status"><span class="dot off"></span>…</small></div>
+    <div class="money" id="money"></div>
+  </header>
+  <div class="offbar" id="offbar"></div>
+  <main>
+    <section class="page on" id="p-rides"><div class="jobmap" id="jobmap"><div class="eta" id="eta"></div></div><div id="rides-body" class="flow"></div></section>
+    <section class="page" id="p-map">
+      <div class="mapbox" id="mapbox">
+        <canvas id="map"></canvas>
+        <div class="scale" id="scale"></div>
+        <div class="compass" id="compass"><svg viewBox="0 0 40 40"><g id="needle"><path d="M20 6 25 20H15z" fill="#FF4D5E"/><path d="M20 34 25 20H15z" fill="#cdd3e4"/><text x="20" y="5.5" font-size="7" font-weight="800" fill="#fff" text-anchor="middle" dominant-baseline="middle">N</text></g></svg></div>
+        <div class="mapbtns">
+          <div class="mapmode"><button id="m-plain">Karte</button><button id="m-navi">Navi</button></div>
+          <button id="m-follow" class="on" aria-label="follow">◎</button>
+          <button id="m-in" aria-label="zoom in">+</button>
+          <button id="m-out" aria-label="zoom out">−</button>
+        </div>
+      </div>
+      <div class="mapinfo" id="mapinfo"></div>
+    </section>
+    <section class="page flow" id="p-bus"></section>
+    <section class="page flow" id="p-me"></section>
+    <section class="page flow" id="p-shop"></section>
+    <section class="page flow" id="p-opts"></section>
+  </main>
+  <nav>
+    <button data-p="rides" class="on"><svg viewBox="0 0 24 24"><path d="M5 17h14M6 17l1.5-6h9L18 17M8 11l1.2-4h5.6L16 11"/><circle cx="8" cy="17" r="2"/><circle cx="16" cy="17" r="2"/></svg><span id="n-rides">Rides</span></button>
+    <button data-p="bus"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="15" rx="3"/><path d="M5 11h14M8 21v-3M16 21v-3"/><circle cx="8.5" cy="14.5" r=".6"/><circle cx="15.5" cy="14.5" r=".6"/></svg><span id="n-bus">Bus</span></button>
+    <button data-p="map"><svg viewBox="0 0 24 24"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14"/></svg><span id="n-map">Map</span></button>
+    <button data-p="me"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><span id="n-me">Account</span></button>
+    <button data-p="shop"><svg viewBox="0 0 24 24"><path d="M4 8h16l-1.5 11a2 2 0 0 1-2 1.7h-9a2 2 0 0 1-2-1.7L4 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg><span id="n-shop">Shop</span></button>
+    <button data-p="opts"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg><span id="n-opts">Options</span></button>
+  </nav>
+</div>
+
+<div class="connect" id="connect">
+  <div class="logo">H</div>
+  <h1 id="c-title">Horizon Transit</h1>
+  <p id="c-text"></p>
+  <div id="c-list"></div>
+  <div id="c-manual"></div>
+  <div style="height:14px"></div>
+  <label class="muted" id="c-code-l" for="c-code"></label>
+  <input id="c-code" class="code" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="····">
+  <div class="err" id="c-err"></div>
+  <button class="btn" id="c-go"></button>
+  <p class="muted" id="c-help" style="margin-top:18px"></p>
+</div>
+
+<div class="done" id="done"><div class="card" id="done-card"></div></div>
+<div class="done pick" id="pick"><div class="card" id="pick-card"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ------------------------------------------------------------------ words: English, German when the game is German */
+const W = {
+  rides: ["Rides", "Fahrten"], map: ["Map", "Karte"], bus: ["Bus", "Bus"], me: ["Account", "Konto"], job: ["Job", "Auftrag"],
+  shop: ["Shop", "Shop"], opts: ["Options", "Optionen"], design: ["Design", "Design"],
+  buy: ["Buy", "Kaufen"], buySure: ["Tap again: buy for", "Nochmal tippen: kaufen für"], bought: ["Bought", "Gekauft"], missing: ["still missing", "fehlen noch"],
+  shopText: ["Paid with your game's credits, and it stays for good.", "Bezahlt mit deinen Spiel-Credits, und es bleibt für immer."],
+  boughtToast: ["Bought", "Gekauft"], owned: ["owned", "gekauft"],
+  optsText: ["The same settings as in the game's phone and the mod menu. Tap to change.", "Dieselben Einstellungen wie im Spiel-Handy und im Mod-Menü. Antippen ändert sie."],
+  stats: ["Statistics", "Statistik"], logbook: ["Logbook", "Fahrtenbuch"], tierNext: ["Next tier", "Nächste Stufe"], ringVia: ["Round trip via", "Rundlinie über"], ringIn: ["Round trip in", "Rundlinie in"], noLog: ["No jobs yet this session.", "In dieser Sitzung noch keine Aufträge."],
+  tipsT: ["Tips", "Trinkgeld"], fiveT: ["5-star rides", "5-Sterne-Fahrten"], bestT: ["Best pay", "Bester Lohn"], longT: ["Longest ride", "Längste Fahrt"],
+  onTimeT: ["On time", "Pünktlich"], specialsT: ["Special rides", "Sonderfahrten"], wishesT: ["Wishes kept", "Wünsche erfüllt"], crashT: ["Crashes", "Unfälle"],
+  paxT: ["Passengers", "Fahrgäste"], streakT: ["Streak (4+ stars)", "Serie (4+ Sterne)"], regularsT: ["Regulars", "Stammgäste"], todayT: ["Today", "Heute"],
+  connected: ["Connected", "Verbunden"], offline: ["No connection", "Keine Verbindung"], 
+  funds: ["game account", "Spielkonto"],
+  goHint: ["Tap GO to go online. Then requests come to you one by one.", "Tippe auf GO, dann bist du online und Anfragen kommen nacheinander rein."],
+  seekT: ["Finding rides …", "Suche Fahrten …"], seekS: ["Requests come by themselves, more often at hotspots.", "Anfragen kommen von selbst, an Hotspots öfter."],
+  newRequest: ["New request", "Neue Anfrage"], regularAsks: ["A regular asks for you", "Stammgast fragt nach dir"], reqLeft: ["Expires in", "Noch"], decline: ["Decline", "Ablehnen"],
+  accept: ["Accept ride", "Fahrt annehmen"], away: ["away", "entfernt"], trip: ["trip", "Fahrt"],
+  limit: ["max", "max."], party: ["people", "Personen"], pool: ["Shared ride", "Sammelfahrt"], regular: ["Regular", "Stammgast"],
+  startLine: ["Start line", "Linie starten"], stops: ["stops", "Haltestellen"], needBus: ["Bus lines need the bus (PG Bus). Switch it off in the mod menu to drive them in any car.", "Buslinien gehen nur im Bus (PG Bus). Im Mod-Menü abschaltbar."],
+  timesDone: ["done", "gefahren"],
+  timeLeft: ["Time left", "Zeit übrig"], mood: ["Mood", "Stimmung"], cancel: ["Cancel job", "Auftrag abbrechen"], cancelSwipe: ["Swipe to cancel the job", "Wischen: Auftrag abbrechen"],
+  goT: ["You're offline", "Du bist offline"], goS: ["Go online to get ride requests.", "Geh online, um Fahrten zu bekommen."],
+  goOn: ["You're online", "Du bist online"], goEnd: ["End", "Beenden"], jobsShort: ["jobs", "Aufträge"],
+  answer: ["Answer", "Antworten"], onboard: ["on board", "an Bord"], fares: ["fares", "Fahrpreise"], 
+  chat: ["Chat", "Chat"], noTime: ["No time limit", "Kein Zeitlimit"], late: ["late", "zu spät"],
+  rep: ["Reputation", "Ruf"], tier: ["Tier", "Stufe"], rating: ["Rating", "Bewertung"], jobsDone: ["Rides", "Fahrten"], linesDone: ["Bus lines", "Buslinien"],
+  km: ["Driven", "Gefahren"], shift: ["Shift", "Schicht"], shiftOn: ["End shift", "Schicht beenden"], shiftOff: ["Start shift", "Schicht starten"],
+  shiftText: ["On a shift, ride requests come by themselves, and the day's goal pays a bonus.", "In der Schicht kommen Anfragen von selbst, und das Tagesziel zahlt einen Bonus."],
+  shiftNow: ["jobs · earned", "Aufträge · verdient"],
+  car: ["Car", "Auto"], noCar: ["Not recognised yet: drive a bit", "Noch nicht erkannt: kurz losfahren"],
+  conn: ["Connection", "Verbindung"], disconnect: ["Connect to another PC", "Mit anderem PC verbinden"],
+  cTitle: ["Connect to your PC", "Mit deinem PC verbinden"],
+  cText: ["Start Forza Horizon 2 with Horizon Transit and switch on \"Phone app\" in the mod menu. Phone and PC must be in the same Wi-Fi.", "Starte Forza Horizon 2 mit Horizon Transit und schalte im Mod-Menü „Handy-App“ ein. Handy und PC müssen im selben WLAN sein."],
+  searching: ["Looking for your PC …", "Suche deinen PC …"], none: ["No PC found yet.", "Noch kein PC gefunden."],
+  again: ["Search again", "Nochmal suchen"], manual: ["PC address (from the mod menu)", "Adresse des PCs (steht im Mod-Menü)"],
+  codeL: ["Pairing code (from the mod menu)", "Kopplungscode (steht im Mod-Menü)"], go: ["Connect", "Verbinden"],
+  wrongCode: ["Wrong code. It is in the mod menu under \"Phone app\".", "Falscher Code. Er steht im Mod-Menü bei „Handy-App“."],
+  noReach: ["The PC doesn't answer. Is the game running, the switch on, and Windows' firewall allowing it?", "Der PC antwortet nicht. Läuft das Spiel, ist der Schalter an und erlaubt die Windows-Firewall es?"],
+  help: ["The first time, Windows asks whether the game may use the network: allow it for private networks.", "Beim ersten Mal fragt Windows, ob das Spiel ins Netzwerk darf: für private Netzwerke erlauben."],
+  ok: ["OK", "OK"], accepted: ["Ride accepted", "Fahrt angenommen"], lineStarted: ["Line started", "Linie gestartet"], notNow: ["Not possible right now", "Gerade nicht möglich"],
+  newRides: ["New ride requests", "Neue Fahranfragen"], you: ["You", "Du"],
+  offT: ["Game not connected", "Spiel nicht verbunden"], offSeen: ["state of", "Stand von"],
+  offWait: ["changes wait for the game", "Änderungen warten aufs Spiel"], offOne: ["change waits for the game", "Änderung wartet aufs Spiel"],
+  offRides: ["Rides come as soon as Forza with Horizon Transit runs. Without the game: your earnings and ride book (Account), timetables (Bus), the map with a target for the GPS, and the options.", "Fahrten gibt es, sobald Forza mit Horizon Transit läuft. Ohne Spiel gehen: Verdienste und Fahrtenbuch (Konto), Fahrpläne (Bus), die Karte mit Ziel fürs Navi und die Optionen."],
+  offOpts: ["Without the game: what you change here, the mod takes over as soon as the game runs.", "Ohne Spiel: Was du hier änderst, übernimmt die Mod, sobald das Spiel läuft."],
+  offBuy: ["Buying needs the game", "Kaufen geht nur mit laufendem Spiel"], synced: ["changes taken over by the game", "Änderungen ins Spiel übernommen"],
+  offMap: ["Map offline", "Karte offline"], offMapT: ["Saves the map on the phone, so it works without the game too (about 20 MB, takes a minute).", "Speichert die Karte auf dem Handy, damit sie auch ohne Spiel geht (etwa 20 MB, dauert eine Minute)."],
+  earn: ["Earnings", "Verdienste"], week: ["This week", "Diese Woche"], lastWeek: ["Last week", "Letzte Woche"], weekOf: ["Week of", "Woche ab"],
+  ridesT: ["Jobs", "Aufträge"], avgT: ["Ø stars", "Ø Sterne"], noBook: ["No jobs yet. Every ride and bus line lands here, with date and pay.", "Noch keine Aufträge. Jede Fahrt und Buslinie landet hier, mit Datum und Lohn."],
+  noDay: ["Nothing that day.", "An dem Tag nichts."], allWeek: ["Whole week", "Ganze Woche"], from: ["From", "Von"], to: ["To", "Nach"], took: ["Time", "Dauer"],
+  tipT: ["Tip", "Trinkgeld"], lateT: ["Late", "Zu spät"], yes: ["yes", "ja"], today: ["Today", "Heute"], yesterday: ["Yesterday", "Gestern"],
+  bookT: ["Ride book", "Fahrtenbuch"], progress: ["Progress", "Fortschritt"], tiersT: ["Tiers", "Stufen"], needsT: ["needs", "braucht"],
+  shopLeft: ["Still to buy", "Noch zu kaufen"], shopAll: ["You have everything from the shop.", "Du hast alles aus dem Shop."], linesT: ["Bus lines driven", "Buslinien gefahren"],
+  browser: ["browser", "Browser"], plan: ["Timetable", "Fahrplan"], onMap: ["On the map", "Auf der Karte"], lineShown: ["Line on the map", "Linie auf der Karte"], close: ["Close", "Schließen"],
+  setTarget: ["Set as target", "Als Ziel merken"], targetQ: ["Target here?", "Ziel hier?"], targetT: ["Your target", "Dein Ziel"], targetDel: ["Remove", "Entfernen"],
+  targetWait: ["The GPS takes it as soon as the game runs.", "Das Navi übernimmt es, sobald das Spiel läuft."], targetSet: ["The GPS takes you there.", "Das Navi führt dich hin."],
+  targetJob: ["After the job the GPS goes there.", "Nach dem Auftrag führt das Navi dorthin."], awayT: ["from your car", "vom Auto"], minT: ["min", "Min."],
+  offMapGo: ["Save the map", "Karte speichern"], offMapHave: ["pieces saved", "Kartenstücke gespeichert"], offMapNeed: ["Only while the game runs", "Nur während das Spiel läuft"], offMapDone: ["Map saved", "Karte gespeichert"], mapPlain: ["Map", "Karte"], mapNavi: ["Navi", "Navi"], hot: ["Hotspot: more pay", "Hotspot: mehr Geld"],
+};
+let DE = 0;
+const t = k => (W[k] || [k, k])[DE];
+
+/* ------------------------------------------------------------------ the connection */
+const $ = id => document.getElementById(id);
+const APP = window.HTApp || null;      /* the Android app's bridge (missing in a browser) */
+const served = location.protocol.startsWith("http"); /* the mod served this page itself */
+const store = {
+  get(k) { try { return localStorage.getItem("ht." + k) || ""; } catch (e) { return ""; } },
+  set(k, v) { try { localStorage.setItem("ht." + k, v); } catch (e) {} },
+};
+let host = served ? location.host : store.get("host");
+let code = store.get("code");
+let S = null, lines = null, lastOk = 0, failing = 0, page = "rides";
+/* 0.10.4: offline: the last state from the phone's memory; option changes wait in "pending" for the game */
+let offline = false, themes = null, snapT = 0, pending = {}, linesT = 0;
+try { pending = JSON.parse(store.get("pending") || "{}") || {}; } catch (e) { pending = {}; }
+/* 0.13: the ride book (from /api/history, kept on the phone) and a target picked on the map while the game was off */
+let book = null, bookSerial = +store.get("bookSerial") || 0, wantTarget = null, gettingBook = false;
+try { book = JSON.parse(store.get("book") || "null"); } catch (e) { book = null; }
+try { wantTarget = JSON.parse(store.get("target") || "null"); } catch (e) { wantTarget = null; }
+async function loadBook() {
+  if (gettingBook) return;
+  gettingBook = true;
+  const r = await get("/api/history", 4000);
+  if (r && r.status === 200) {
+    try { const txt = await r.text(), j = JSON.parse(txt); book = j.rides || []; bookSerial = j.serial; store.set("book", JSON.stringify(book)); store.set("bookSerial", String(bookSerial)); if (S && page === "me") drawMe(); } catch (e) {}
+  }
+  gettingBook = false;
+}
+const tgArg = (x, z) => Math.round((x + 30000) / 2) * 32768 + Math.round((z + 30000) / 2);
+function savePending() { store.set("pending", JSON.stringify(pending)); }
+function offlineCopy(x) {
+  x.mode = "idle"; x.job = null; x.offers = []; x.reply = null; x.route = []; x.card = null; x.hud = {}; x.hot = [];
+  if (x.car) x.car.speed = 0;
+  return x;
+}
+function goOffline() {
+  if (offline || !S) return;
+  offline = true; S = offlineCopy(S); render();
+}
+
+function base() { return "http://" + host; }
+async function get(path, ms) {
+  const c = new AbortController(), id = setTimeout(() => c.abort(), ms || 3000);
+  try {
+    const sep = path.includes("?") ? "&" : "?";
+    const r = await fetch(base() + path + sep + "k=" + encodeURIComponent(code), { signal: c.signal, cache: "no-store" });
+    clearTimeout(id);
+    return r;
+  } catch (e) { clearTimeout(id); return null; }
+}
+
+/* ------------------------------------------------------------------ connecting */
+let found = [];
+function showConnect(err) {
+  $("connect").classList.remove("off");
+  $("c-title").textContent = t("cTitle");
+  $("c-text").textContent = t("cText");
+  $("c-code-l").textContent = t("codeL");
+  $("c-go").textContent = t("go");
+  $("c-help").textContent = t("help");
+  $("c-err").textContent = err || "";
+  $("c-code").value = code;
+  if (served) { $("c-list").innerHTML = ""; $("c-manual").innerHTML = ""; return; }
+  drawFound();
+  $("c-manual").innerHTML = `<div style="height:10px"></div><label class="muted" for="c-host">${t("manual")}</label><input id="c-host" inputmode="url" placeholder="192.168.0.12:8710" value="${esc(host)}">`;
+  search();
+}
+function drawFound(busy) {
+  const list = $("c-list");
+  let h = "";
+  for (const f of found)
+    h += `<button class="pc ${f.addr === host ? "sel" : ""}" data-a="${esc(f.addr)}"><div class="logo" style="width:36px;height:36px;font-size:20px;border-radius:10px">H</div>
+      <div class="grow"><b>${esc(f.name)}</b><div class="muted">${esc(f.addr)} · Horizon Transit ${esc(f.version)}</div></div></button>`;
+  h += `<p class="muted">${busy ? '<span class="spin"></span>' + t("searching") : (found.length ? "" : t("none"))}
+        ${busy ? "" : ` <button style="color:var(--a1);font-weight:700" id="c-again">${t("again")}</button>`}</p>`;
+  list.innerHTML = h;
+  list.querySelectorAll(".pc").forEach(b => b.onclick = () => { host = b.dataset.a; const i = $("c-host"); if (i) i.value = host; drawFound(); });
+  const a = $("c-again"); if (a) a.onclick = search;
+}
+function search() {
+  if (!APP || !APP.discover) { drawFound(false); return; }
+  drawFound(true);
+  APP.discover();
+}
+/* the Android app calls this with what answered */
+window.htFound = function (list) {
+  try { found = typeof list === "string" ? JSON.parse(list) : list; } catch (e) { found = []; }
+  for (const f of found) f.addr = f.ip + ":" + f.port;
+  if (found.length) {
+    if (found[0].de !== undefined) DE = found[0].de ? 1 : 0;
+    if (!host || !found.some(f => f.addr === host)) host = found[0].addr;
+    const i = $("c-host"); if (i) i.value = host;
+  }
+  if (!$("connect").classList.contains("off")) { showConnect($("c-err").textContent); drawFound(false); }
+};
+$("c-go").onclick = async () => {
+  const i = $("c-host");
+  if (i && i.value.trim()) host = i.value.trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  if (host && !host.includes(":")) host += ":8710";
+  code = $("c-code").value.trim();
+  $("c-err").textContent = "";
+  $("c-go").disabled = true;
+  const r = await get("/api/state", 4000);
+  $("c-go").disabled = false;
+  if (!r) { $("c-err").textContent = t("noReach"); return; }
+  if (r.status === 403) { $("c-err").textContent = t("wrongCode"); return; }
+  store.set("host", host); store.set("code", code);
+  $("connect").classList.add("off");
+  start();
+};
+$("c-code").addEventListener("input", e => { e.target.value = e.target.value.replace(/\D/g, ""); if (e.target.value.length === 4) $("c-go").click(); });
+
+/* ------------------------------------------------------------------ polling */
+let timer = 0, seenFeed = 0, seenOffers = "", seenCard = 0, firstState = true;
+function start() {
+  clearTimeout(timer);
+  firstState = true;
+  $("connect").classList.add("off"); /* 0.10.4: a saved PC: straight into the app (the connect screen stayed over it) */
+  if (!S) { /* 0.10.4: show the last state right away; the game may not run */
+    try {
+      const l = JSON.parse(store.get("lines") || "null"); if (l) { lines = l.lines; themes = l.themes || null; }
+      const snap = JSON.parse(store.get("snap") || "null");
+      if (snap) { S = offlineCopy(snap); offline = true; DE = S.de ? 1 : 0; render(); }
+    } catch (e) {}
+  }
+  if (APP && APP.keepAwake) APP.keepAwake(true);
+  poll();
+}
+async function poll() {
+  const r = await get("/api/state", 2500);
+  if (r && r.status === 200) {
+    try { S = await r.json(); } catch (e) { S = null; }
+    if (S) {
+      lastOk = Date.now(); failing = 0;
+      DE = S.de ? 1 : 0;
+      const back = offline; offline = false;
+      if (firstState || back) { modVer = ""; gettingVer = false; } /* 0.13: the mod may be newer now */
+      if (!lines || !themes || back || (Date.now() - linesT > 20000 && lines.some(l => !l.way))) { linesT = Date.now(); loadLines(); } /* 0.13: the lines' ways come one by one */
+      if (S.book && S.book !== bookSerial) loadBook();
+      if (wantTarget) { const w = wantTarget; wantTarget = null; store.set("target", ""); get(`/api/do?a=target&n=${tgArg(w.x, w.z)}`); }
+      if (Date.now() - snapT > 4000) { snapT = Date.now(); store.set("snap", JSON.stringify(S)); store.set("seen", String(Date.now())); }
+      render();
+      if (Object.keys(pending).length) syncPending();
+    }
+  } else if (r && r.status === 403) { showConnect(t("wrongCode")); return; }
+  else { failing++; if (failing >= 3) goOffline(); drawStatus(); }
+  timer = setTimeout(poll, offline ? 2000 : S && S.mode !== "idle" ? 200 : 700);
+}
+async function loadLines() {
+  const r = await get("/api/lines");
+  if (r && r.status === 200) {
+    try { const txt = await r.text(), j = JSON.parse(txt); lines = j.lines; themes = j.themes || themes; store.set("lines", txt); } catch (e) {}
+  }
+}
+/* 0.10.4: what was changed without the game goes to the game now */
+let syncing = false;
+async function syncPending() {
+  if (syncing || !S || !S.settings) return;
+  syncing = true;
+  let n = 0;
+  for (const [row, want] of Object.entries(pending)) {
+    const o = S.settings.find(x => x.i === +row);
+    if (o && o.choices && o.idx !== want) { await get(`/api/do?a=set&n=${+row * 16 + want}`); n++; }
+  }
+  pending = {}; savePending(); syncing = false;
+  if (n) { toast(`${n} ${t("synced")}`); buzz(40); }
+  drawOffbar();
+}
+async function act(a, n) {
+  buzz(25);
+  const r = await get(`/api/do?a=${a}&n=${n || 0}`);
+  if (!r || r.status !== 200) toast(t("notNow"));
+  setTimeout(() => { clearTimeout(timer); poll(); }, 250);
+}
+function buzz(ms) { try { if (APP && APP.vibrate) APP.vibrate(ms); else if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} }
+let toastT = 0;
+function toast(s) { const e = $("toast"); e.textContent = s; e.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(() => e.classList.remove("on"), 2600); }
+
+/* ------------------------------------------------------------------ drawing the pages */
+/* 0.13: "5 %" and "+X CR" never break at the space */
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]).replace(/ (%|CR\b)/g, "\u00a0$1"); }
+function money(v) { return (v < 0 ? "−" : "") + Math.abs(Math.round(v)).toLocaleString(DE ? "de-DE" : "en-GB") + "\u00a0CR"; }
+function dist(m) {
+  if (S && S.imperial) { const mi = m / 1609.344; return mi < 0.2 ? Math.round(m * 3.28084 / 50) * 50 + " ft" : mi.toFixed(1).replace(".", DE ? "," : ".") + " mi"; }
+  return m < 1000 ? Math.round(m / 10) * 10 + " m" : (m / 1000).toFixed(1).replace(".", DE ? "," : ".") + " km";
+}
+function clock(s) { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+function stars(n) { return "★★★★★".slice(0, n) + "☆☆☆☆☆".slice(0, 5 - n); }
+
+function drawOffbar() {
+  const n = Object.keys(pending).length + (wantTarget ? 1 : 0), e = $("offbar"), seen = +store.get("seen") || 0;
+  const on = (offline && failing > 0) || (offline && !lastOk);
+  e.classList.toggle("on", on);
+  if (on) e.innerHTML = `<b>${t("offT")}</b>${seen ? " · " + t("offSeen") + " " + new Date(seen).toLocaleTimeString(DE ? "de-DE" : "en-GB", { hour: "2-digit", minute: "2-digit" }) : ""}${n ? ` · ${n} ${n === 1 ? t("offOne") : t("offWait")}` : ""}`;
+}
+function drawStatus() {
+  drawOffbar();
+  const ok = S && Date.now() - lastOk < 5000;
+  $("status").innerHTML = `<span class="dot ${ok ? "" : "off"}"></span>${ok ? (S.car && S.car.name ? esc(S.car.name) : t("connected")) : t("offline")}`;
+}
+function render() {
+  drawStatus();
+  $("money").innerHTML = `${S.money < 0 ? "… CR" : money(S.money)}<small>${t("funds")}</small>`;
+  $("n-rides").textContent = S.mode === "idle" ? t("rides") : t("job");
+  $("n-map").textContent = t("map"); $("n-bus").textContent = t("bus"); $("n-me").textContent = t("me");
+  $("n-shop").textContent = t("shop"); $("n-opts").textContent = t("opts");
+  $("m-plain").textContent = t("mapPlain"); $("m-navi").textContent = t("mapNavi");
+  if (S.theme) applyTheme(S.theme);
+  /* news: a new request, a passenger's line */
+  const ids = S.offers.map(o => o.name + o.to.name).join("|");
+  if (!firstState && S.mode === "idle" && ids && ids !== seenOffers) { buzz(60); if (page !== "rides") toast(t("newRides")); }
+  seenOffers = ids;
+  const last = S.feed.length ? S.feed[S.feed.length - 1].id : 0;
+  if (!firstState && last > seenFeed && S.mode !== "idle") buzz(20);
+  if (firstState) seenCard = S.card ? S.card.serial : 0;
+  firstState = false;
+  if (page === "rides") drawRides();
+  if (page === "bus") drawBus();
+  if (page === "me") drawMe();
+  if (page === "shop") drawShop();
+  if (page === "opts") drawOpts();
+  if (page === "map") drawMapInfo();
+  placeMap();
+  seenFeed = last;
+  drawCard();
+}
+
+function offerCard(o, i) {
+  const tags = [];
+  tags.push(`<span class="tag">${esc(o.cls)}</span>`);
+  if (o.type && o.ptype) tags.push(`<span class="tag ${o.ptype >= 4 ? "vip" : ""}">${esc(o.type)}</span>`);
+  if (o.surge > 1.01) tags.push(`<span class="tag hot">${o.surge.toFixed(1).replace(".", DE ? "," : ".")}×</span>`);
+  if (o.regular) tags.push(`<span class="tag vip">${t("regular")}</span>`);
+  if (o.pool) tags.push(`<span class="tag">${t("pool")}</span>`);
+  if (o.party > 1) tags.push(`<span class="tag">${o.party} ${t("party")}</span>`);
+  return `<div class="card">
+    <div class="row"><div class="grow"><b class="ell" style="display:block;font-size:17px">${esc(o.name)}</b>
+      <div class="muted">${dist(o.pickupM)} ${t("away")} · ${dist(o.tripM)} ${t("trip")} · ${t("limit")} ${o.maxShown} ${esc(S.unit)}</div></div>
+      <div class="pay">${money(o.pay)}</div></div>
+    <div style="margin-top:8px">${tags.join("")}</div>
+    <div class="route"><div class="ell">${esc(o.from.name)}</div><div class="to ell">${esc(o.to.name)}</div></div>
+    <button class="btn take" data-acc="${i}">${t("accept")}<span>${money(o.pay)} →</span></button></div>`;
+}
+
+function drawRides() {
+  const p = $("rides-body");
+  if (S.mode !== "idle") { drawJob(p); return; }
+  p._job = null;
+  let h = "";
+  { /* 0.11: like a ride app: a big round GO starts the shift; online, the day's earnings sit in the card */
+    const sh = S.shift || {};
+    h += sh.on ? `<div class="card gocard on"><span class="live"></span><div class="grow"><b>${t("goOn")}</b><div class="muted">${sh.jobs} / ${sh.goal} ${t("jobsShort")} · ${money(sh.earned || 0)}</div></div>
+        <button class="btn ghost" id="go" style="width:auto;padding:10px 16px">${t("goEnd")}</button></div>`
+      : `<div class="card gocard"><div class="grow"><b>${t("goT")}</b><div class="muted">${t("goS")}</div></div>
+        <button class="gobtn" id="go" ${offline ? "disabled" : ""}>GO</button></div>`;
+  }
+  /* 0.13: like a driver app: offline only GO; online "looking for rides", then one request with a countdown */
+  if (offline) h += `<h2>${t("rides")}</h2><div class="empty"><b>${t("offT")}</b>${t("offRides")}</div>`;
+  else if (!(S.shift || {}).on) h += `<p class="muted" style="margin:14px 6px">${t("goHint")}</p>`;
+  else if (!S.offers.length) h += `<div class="card seek"><div class="radar"><i></i><i></i><b></b></div><div class="grow"><b>${t("seekT")}</b><div class="muted">${t("seekS")}</div></div></div>`;
+  else {
+    const left = Math.max(0, S.reqLeft || 0), total = S.reqTotal || 20, secs = Math.ceil(left);
+    h += `<h2>${S.offers[0].regular ? t("regularAsks") : t("newRequest")}</h2>` + offerCard(S.offers[0], 0)
+      .replace('<div class="card">', `<div class="card req"><div class="timer"><i style="width:${(left / total * 100).toFixed(1)}%;animation-duration:${left.toFixed(1)}s"></i></div>`)
+      .replace(/<\/div>$/, `<div class="reqrow"><span class="muted">${t("reqLeft")} ${secs} s</span><button class="btn ghost" id="decline">${t("decline")}</button></div></div>`);
+  }
+  if (S.hot && S.hot.length) h += `<h2>${t("hot")}</h2>` + S.hot.map(x => `<div class="card row"><span class="tag hot">${x.factor.toFixed(1)}×</span><div class="grow ell">${esc(x.name)}</div></div>`).join("");
+  if (!setH(p, h)) return; /* 0.10.2: unchanged: keep it (a rebuild can swallow a tap) */
+  p.querySelectorAll("[data-acc]").forEach(b => b.onclick = () => { act("accept", b.dataset.acc); toast(t("accepted")); });
+  { const d = $("decline"); if (d) d.onclick = () => { buzz(20); act("refresh"); }; }
+  $("go").onclick = () => { buzz(30); act("shift"); };
+}
+
+/* 0.10.2: the job view is built once per job; each poll only changes the parts whose text changed. Rebuilding it all
+   every 200 ms restarted the chat's fade-in and the speed sign's flashing (the chat blinked). */
+function setH(el, h) { if (el && el._h !== h) { el._h = h; el.innerHTML = h; return true; } return false; }
+const feedSeen = new Map(); /* message id -> when it first came, so only new lines fade in, and only once */
+function drawJob(p) {
+  const j = S.job, H = S.hud || {}, key = j.kind + "|" + (j.kind === "bus" ? j.lineNumber : j.ride.name + j.ride.to.name);
+  if (p._job !== key || !$("j-head")) {
+    p._job = key; p._h = null;
+    p.innerHTML = `<div class="card"><div class="job-top"><div id="j-sign"></div><div class="grow" id="j-head"></div><div class="speed" id="j-speed"></div></div>
+      <div class="bar"><i id="j-bar"></i></div><div id="j-chips"></div></div>
+      <div id="j-reply"></div><div class="stats" id="j-stats"></div><div id="j-route"></div><div id="j-feed"></div>
+      <div style="height:14px"></div><div class="slide" id="cancel"><i></i><span></span></div>`;
+    hookJob();
+  }
+  setH($("j-sign"), H.signLimit ? `<div class="sign ${H.signFree ? "free" : H.signOver >= 2 ? "over2" : H.signOver ? "over" : ""}">${H.signFree ? "" : H.signLimit}<small>${H.signFree ? "" : esc(H.signUnit)}</small></div>` : "");
+  setH($("j-head"), `<div class="muted">${esc(j.stageName)}</div><b class="clamp2" style="font-size:19px;line-height:1.2">${esc(H.tripTo || (j.ride ? j.ride.to.name : ""))}</b>
+    <div class="muted">${j.targetM != null ? dist(j.targetM) : ""}</div>`);
+  setH($("j-speed"), `${S.car.ok ? S.car.speed : "–"}<small>${esc(S.unit)}</small>`);
+  $("j-bar").style.width = Math.round((H.tripProgress || 0) * 100) + "%";
+  { /* 0.11: ETA badge on the map: minutes from the distance left at the current speed (at least 40 km/h) */
+    const e = $("eta"), m = j.targetM, kmh = Math.max(40, S.car.ok ? S.car.speed * (S.unit === "mph" ? 1.609 : 1) : 0);
+    if (e) { e.classList.toggle("on", m != null);
+      if (m != null) setH(e, `<b>${Math.max(1, Math.round(m / (kmh / 3.6) / 60))}<small>Min</small></b><span>${esc(j.stageName)}<br><span class="muted">${dist(m)}</span></span>`); } }
+  setH($("j-chips"), (H.wish ? `<span class="chip wish">${esc(H.wish)}</span>` : "") + (H.countdown ? `<span class="chip">${esc(H.countdownLabel)} ${H.countdown}</span>` : ""));
+  if (setH($("j-reply"), S.reply ? `<div class="card reply"><q>${esc(S.reply.q)}</q><button class="btn" id="reply">${t("answer")}: „${esc(S.reply.a)}“</button></div>` : ""))
+    { const r = $("reply"); if (r) r.onclick = () => act("reply"); }
+  const q = j.sat >= 70 ? "" : j.sat >= 45 ? "mid" : "low";
+  let h = `<div class="stat"><span>${t("mood")}</span><b>${j.sat} % <small style="color:var(--warn);font-size:14px">${stars(j.stars)}</small></b><div class="bar q ${q}"><i style="width:${j.sat}%"></i></div></div>
+    <div class="stat"><span>${t("timeLeft")}</span><b style="color:${j.timeLeft >= 0 && j.timeLeft < 30 ? "var(--bad)" : "inherit"}">${j.timeLeft < 0 ? "–" : clock(j.timeLeft)}</b>
+      <div class="muted">${j.timeLeft < 0 ? t("noTime") : ""}</div></div>`;
+  if (j.kind === "bus") h += `<div class="stat"><span>${t("onboard")}</span><b>${j.onboard} / ${j.seats}</b></div><div class="stat"><span>${t("fares")}</span><b>${money(j.fares)}</b></div>`;
+  else if (H.meter >= 0) h += `<div class="stat"><span>${esc(H.meterLabel)}</span><b>${money(H.meter)}</b></div><div class="stat"><span>${esc(j.ride.cls)}</span><b class="ell">${esc(j.ride.name)}</b></div>`;
+  setH($("j-stats"), h);
+  if (j.kind === "bus") {
+    h = `<h2>${t("bus")} ${esc(j.lineNumber)} · ${esc(j.lineTitle)}</h2><div class="card"><ul class="stops">`;
+    j.stops.forEach((st, i) => h += `<li class="${i < j.stop ? "done" : i === j.stop ? "now" : ""}"><i>${i + 1}</i><span class="ell">${esc(st.name)}</span></li>`);
+    h += `</ul></div>`;
+  } else h = `<div class="card"><div class="route" style="margin:0"><div class="ell">${esc(j.ride.from.name)}</div><div class="to ell">${esc(j.ride.to.name)}</div></div></div>`;
+  setH($("j-route"), h);
+  /* the chat: a line fades in once, when it is new (a line from before the app opened doesn't) */
+  const now = performance.now(), msgs = S.feed.slice(-8);
+  for (const m of msgs) if (!feedSeen.has(m.id)) feedSeen.set(m.id, firstFeed ? -1e9 : now);
+  firstFeed = false;
+  h = msgs.length ? `<h2>${t("chat")}</h2><div class="feed">` + msgs.map(m => {
+    const age = now - feedSeen.get(m.id);
+    return `<div class="msg ${m.style === 1 && m.name === t("you") ? "me" : ""} s${m.style} ${age < 300 ? "new" : ""}" style="${age < 300 ? `animation-delay:-${Math.round(age)}ms` : ""}"><b>${esc(m.name)}</b>${esc(m.text)}</div>`;
+  }).join("") + `</div>` : "";
+  if (setH($("j-feed"), h) && msgs.some(m => now - feedSeen.get(m.id) < 300)) setTimeout(() => { if (S && S.mode !== "idle" && page === "rides") drawRides(); }, 320);
+  { const c = $("cancel").querySelector("span"); if (c.textContent !== t("cancelSwipe")) c.textContent = t("cancelSwipe"); }
+}
+let armed = 0, armT = 0, firstFeed = true;
+function hookJob() {
+  /* 0.11: swipe to cancel, like a ride app's slider: a tap while driving can't end the job by mistake */
+  const sl = $("cancel"), kn = sl.querySelector("i");
+  let x0 = null, dx = 0;
+  const max = () => sl.clientWidth - kn.offsetWidth - 8;
+  kn.onpointerdown = e => { x0 = e.clientX; dx = 0; kn.setPointerCapture(e.pointerId); sl.classList.add("drag"); buzz(15); };
+  kn.onpointermove = e => { if (x0 == null) return; dx = Math.max(0, Math.min(max(), e.clientX - x0)); kn.style.transform = `translateX(${dx}px)`; sl.style.setProperty("--k", (dx / max()).toFixed(3)); };
+  kn.onpointerup = kn.onpointercancel = () => {
+    if (x0 == null) return; x0 = null; sl.classList.remove("drag");
+    if (dx >= max() * 0.85) { kn.style.transform = `translateX(${max()}px)`; buzz(60); act("cancel"); }
+    else { kn.style.transform = ""; sl.style.setProperty("--k", 0); }
+  };
+}
+
+/* 0.13: a ring line starts and ends at the same place: name the stop on the far side instead */
+function lineEnd(l) {
+  const town = x => x.name.split(" · ")[0];
+  const a = town(l.stops[0]), z = l.stops[l.stops.length - 1].name;
+  if (l.stops[0].name !== z) return z;
+  const n = l.stops.length, m = Math.floor(n / 2);
+  for (let d = 0; d < n; ++d)
+    for (const i of [m + d, m - d]) if (i > 0 && i < n - 1 && town(l.stops[i]) !== a) return t("ringVia") + " " + town(l.stops[i]);
+  return t("ringIn") + " " + a;
+}
+const busOpen = {};
+let shownLine = -1;
+/* 0.13: a line on the map: its way and stops, the view over all of it */
+function showLineOnMap(i) {
+  const l = lines && lines.find(x => x.i === i); if (!l) return;
+  shownLine = i;
+  const xs = l.stops.map(s => s.x), zs = l.stops.map(s => s.z);
+  mv.x = (Math.min(...xs) + Math.max(...xs)) / 2; mv.z = (Math.min(...zs) + Math.max(...zs)) / 2;
+  const span = Math.max(600, Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs)) * 1.35;
+  setNavi(false); setFollow(false);
+  document.querySelector('nav button[data-p="map"]').click();
+  const w = Math.min(cv.clientWidth || 360, cv.clientHeight || 600);
+  mv.zoom = Math.max(1, Math.min(9, Math.log2(w * WS / (TS * span))));
+  drawMapInfo();
+}
+function drawBus() {
+  const p = $("p-bus");
+  if (!lines) { setH(p, `<div class="empty"><span class="spin"></span></div>`); return; }
+  let h = `<h2>${t("bus")}</h2>`;
+  if (S.needsBus) h += `<div class="card muted">${t("needBus")}</div>`;
+  for (const l of lines) {
+    const running = S.job && S.job.kind === "bus" && S.job.line === l.i;
+    h += `<div class="card"><div class="row"><div class="logo" style="width:42px;height:42px;font-size:17px;border-radius:12px">${esc(l.number)}</div>
+      <div class="grow"><b class="ell" style="display:block">${esc(l.title)}</b><div class="muted">${l.stops.length} ${t("stops")}${l.done ? " · " + l.done + "× " + t("timesDone") : ""}</div></div></div>
+      <div class="route"><div class="ell">${esc(l.stops[0].name)}</div><div class="to ell">${esc(lineEnd(l))}</div></div>
+      ${busOpen[l.i] ? `<div class="tt">${l.stops.map(st => `<div><b>${st.min !== undefined ? "+" + st.min + " " + t("minT") : ""}</b><span class="ell">${esc(st.name)}</span></div>`).join("")}</div>` : ""}
+      <div class="row2"><button class="btn ghost" data-tt="${l.i}">${t("plan")}</button><button class="btn ghost" data-show="${l.i}">${t("onMap")}</button></div>
+      <button class="btn ${S.mode !== "idle" || S.needsBus || offline ? "ghost" : ""}" style="margin-top:8px" data-line="${l.i}" ${S.mode !== "idle" || S.needsBus || offline ? "disabled" : ""}>${running ? "▶" : t("startLine")}</button></div>`;
+  }
+  if (!setH(p, h)) return; /* 0.10.2: unchanged: keep it (a rebuild can swallow a tap) */
+  p.querySelectorAll("[data-line]").forEach(b => b.onclick = () => { act("line", b.dataset.line); toast(t("lineStarted")); });
+  p.querySelectorAll("[data-tt]").forEach(b => b.onclick = () => { busOpen[b.dataset.tt] = !busOpen[b.dataset.tt]; drawBus(); });
+  p.querySelectorAll("[data-show]").forEach(b => b.onclick = () => showLineOnMap(+b.dataset.show));
+}
+
+/* ------------------------------------------------------------------ 0.10.1: the design of the game's phone */
+let themeKey = "";
+function hexA(h, a) { const n = parseInt(h.slice(1), 16); return `rgba(${n >> 16},${n >> 8 & 255},${n & 255},${a})`; }
+function lum(h) { const n = parseInt(h.slice(1), 16); return (0.299 * (n >> 16) + 0.587 * (n >> 8 & 255) + 0.114 * (n & 255)) / 255; }
+function applyTheme(th) {
+  const k = JSON.stringify(th);
+  if (k === themeKey) return;
+  themeKey = k;
+  const r = document.documentElement.style, light = lum(th.bottom) > 0.6, a = th.cardAlpha / 255;
+  r.setProperty("--bg", th.bottom); r.setProperty("--bg2", th.top);
+  r.setProperty("--panel", a >= 1 ? th.card : hexA(th.card, Math.max(a, .12)));
+  r.setProperty("--panel2", hexA(th.text, light ? .06 : .08));
+  r.setProperty("--line", a >= 1 ? th.line : hexA(th.line, .22));
+  r.setProperty("--text", th.text); r.setProperty("--dim", th.dim);
+  r.setProperty("--a1", th.accent); r.setProperty("--a2", th.accent2); r.setProperty("--sel", th.selText);
+  r.setProperty("--warn", th.warn);
+  r.setProperty("--navbg", a >= 1 ? th.card : hexA(th.bottom, .9));
+  /* 0.11: the glass and the wallpaper from the same colours */
+  if (a >= 1) { r.setProperty("--glass", hexA(th.card, light ? .55 : .5)); r.setProperty("--glass2", hexA(th.card, light ? .72 : .7)); }
+  else { r.setProperty("--glass", hexA(th.card, Math.max(a, .14))); r.setProperty("--glass2", hexA(th.bottom, .62)); } /* see-through designs (Festival) */
+  r.setProperty("--rim", light ? "rgba(255,255,255,.75)" : "rgba(255,255,255,.12)"); r.setProperty("--shine", light ? "rgba(255,255,255,.95)" : "rgba(255,255,255,.14)");
+  r.setProperty("--blob1", hexA(th.accent, light ? .32 : .42)); r.setProperty("--blob2", hexA(th.accent2, light ? .26 : .30));
+  r.setProperty("--blob3", hexA(th.top === th.bottom ? th.accent : th.top, light ? .35 : .55)); r.setProperty("--pill", hexA(th.accent, light ? .16 : .22));
+  setTimeout(movePill, 0);
+  document.querySelector('meta[name=theme-color]').content = th.top;
+  if (APP && APP.setColors) APP.setColors(th.top, a >= 1 ? th.card : th.bottom, light);
+}
+
+const ICONS = [
+  '<path d="M4 18a8 8 0 0 1 16 0"/><path d="M12 18l4-6"/><circle cx="12" cy="18" r="1"/>',                 /* dispatch radio */
+  '<path d="M4 10v4h3l6 4V6L7 10H4z"/><path d="M17 9a4 4 0 0 1 0 6"/>',                                     /* ads */
+  '<path d="M6 12V8a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v4"/><path d="M4 12h16v5H4z"/><path d="M6 17v2M18 17v2"/>', /* comfort */
+  '<rect x="4" y="3" width="16" height="15" rx="3"/><path d="M4 11h16M8 21v-3M16 21v-3"/>',                  /* bigger bus */
+  '<path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z"/>',                    /* premium */
+  '<path d="M6 9h12l-1 11H7z"/><path d="M9 9V7a3 3 0 0 1 6 0v2"/><path d="M12 13v3"/>',                     /* tip box */
+  '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/>',                      /* customer file */
+  '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/><path d="M9 15l2 2 4-4"/>', /* shift planner */
+  '<rect x="6" y="3" width="12" height="18" rx="2"/><path d="M9 7h6M9 11h6M10 15h4v3h-4z"/>',               /* ticket machine */
+  '<path d="M9 3h6l-1 4H10z"/><path d="M8 7h8l-1 14H9z"/><path d="M9 12h6"/>',                               /* water & snacks */
+  '<rect x="3" y="7" width="13" height="10" rx="2"/><path d="M16 11l5-3v8l-5-3"/><circle cx="9" cy="12" r="2"/>', /* dashcam */
+  '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M10 2h4"/>',                                          /* on-time bonus */
+  '<path d="M3 20L9 4h6l6 16"/><path d="M12 6v3M12 12v3M12 18v2"/>',                                        /* long-haul */
+  '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12l6-6"/>',                   /* hotspot radar */
+  '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',                                          /* night surcharge */
+  '<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/>',                                                    /* air conditioning */
+  '<rect x="3" y="4" width="18" height="11" rx="1"/><path d="M8 15v6M16 15v6M7 9h10"/>',                    /* billboards */
+  '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',                         /* insurance */
+];
+let buyArmed = -1, buyT = 0;
+function drawShop() {
+  const p = $("p-shop");
+  /* 0.13: the shop takes the game's credits (S.money = the game account, -1 = not read yet) */
+  const have = S.money, cost = money;
+  let h = `<h2>${t("shop")}</h2><div class="card hero"><div class="muted">${t("funds")}</div><div class="pay" style="font-size:30px">${have < 0 ? "… CR" : cost(have)}</div>
+    <div class="muted" style="margin-top:4px">${t("shopText")}</div></div>`;
+  const items = [...S.shop].sort((a, b) => a.bought - b.bought || a.price - b.price);
+  for (const it of items) {
+    const can = !it.bought && have >= it.price && !offline;
+    h += `<div class="card item ${it.bought ? "bought" : ""}"><div class="row"><div class="ico"><svg viewBox="0 0 24 24">${ICONS[it.i] || ICONS[4]}</svg></div>
+      <div class="grow"><b style="display:block">${esc(it.name)}</b><div class="muted">${esc(it.what)}</div></div>
+      ${it.bought ? `<span class="ok">✓ ${t("bought")}</span>` : `<div class="price">${cost(it.price)}</div>`}</div>`;
+    if (!it.bought) {
+      if (can) h += `<div class="gap"></div><button class="btn" data-buy="${it.i}">${buyArmed === it.i ? t("buySure") + " " + cost(it.price) : t("buy")}</button>`;
+      else if (offline && have >= it.price) h += `<div class="muted" style="margin-top:10px">${t("offBuy")}</div>`;
+      else h += `<div class="bar"><i style="width:${Math.min(100, Math.max(0, have) / it.price * 100)}%"></i></div><div class="muted" style="margin-top:6px">${cost(it.price - Math.max(0, have))} ${t("missing")}</div>`;
+    }
+    h += `</div>`;
+  }
+  if (!setH(p, h)) return; /* 0.10.2: unchanged: keep it (a rebuild can swallow a tap) */
+  p.querySelectorAll("[data-buy]").forEach(b => b.onclick = () => {
+    const i = +b.dataset.buy;
+    if (buyArmed !== i) { buyArmed = i; buzz(30); clearTimeout(buyT); buyT = setTimeout(() => { buyArmed = -1; if (S) render(); }, 3500); drawShop(); return; }
+    buyArmed = -1; act("buy", i); toast(t("boughtToast") + ": " + (S.shop.find(x => x.i === i) || {}).name);
+  });
+}
+
+/* 0.13: the versions, small at the top of the Options (the mod's from /api/hello, kept for without the game) */
+let modVer = store.get("modVer"), gettingVer = false;
+function drawOpts() {
+  const p = $("p-opts");
+  if (!modVer && !offline && !gettingVer) { gettingVer = true; get("/api/hello", 3000).then(r => r && r.ok ? r.json() : null).then(j => { if (j && j.version) { modVer = j.version; store.set("modVer", modVer); drawOpts(); } }).catch(() => {}); }
+  const appVer = APP && APP.version ? APP.version() : t("browser");
+  let h = `<div class="muted" style="font-size:12px;margin:2px 2px 6px">Mod ${esc(modVer || "–")} · App ${esc(appVer)}</div><h2>${t("opts")}</h2><p class="muted" style="margin:0 2px 10px">${offline ? t("offOpts") : t("optsText")}</p><div class="card list">`;
+  for (const o of S.settings || []) {
+    const on = /^(on|an|code)/i.test(o.value), wait = pending[o.i] !== undefined;
+    /* row 0 is the phone app itself: switching it off here would cut this very connection, so it only shows the code */
+    if (o.i === 0) h += `<div class="opt"><div class="grow"><b>${esc(o.label)}</b><small>${offline ? t("offT") : t("connected")} · ${esc(host)}</small></div><span class="v on">${esc(o.value)}</span></div>`;
+    else h += `<button class="opt" data-set="${o.i}" ${offline && !o.choices ? "disabled" : ""}><div class="grow"><b>${esc(o.label)}</b>${wait ? `<small>${t("offOne")}</small>` : ""}</div>${o.choices && o.choices.length === 2 ? `<span class="sw ${o.idx ? "on" : ""}"></span>` : `<span class="v ${on ? "on" : ""}">${esc(o.value)}</span>`}</button>`;
+  }
+  h += `</div><div class="card"><div class="muted">${t("design")}: <b style="color:var(--text)">${esc(S.theme ? S.theme.name : "")}</b></div></div>`;
+  if (APP && APP.cacheInfo) { /* 0.10.4: the map on the phone */
+    let have = 0; try { have = +String(APP.cacheInfo()).split(",")[0] || 0; } catch (e) {}
+    h += `<h2>${t("offMap")}</h2><div class="card"><div class="muted">${t("offMapT")}</div>
+      <div class="muted" style="margin-top:6px">${have} ${t("offMapHave")}</div>
+      ${pre ? `<div class="bar"><i style="width:${Math.round(pre.done / pre.total * 100)}%"></i></div><div class="muted" style="margin-top:6px">${pre.done} / ${pre.total}</div>`
+            : `<div style="height:10px"></div><button class="btn ghost" id="premap" ${offline ? "disabled" : ""}>${offline ? t("offMapNeed") : t("offMapGo")}</button>`}</div>`;
+  }
+  h += `<h2>${t("conn")}</h2><div class="card"><div class="muted">${esc(host)}</div><div style="height:10px"></div><button class="btn ghost" id="other">${t("disconnect")}</button></div>`;
+  if (!setH(p, h)) return; /* 0.10.2: unchanged: keep it (a rebuild can swallow a tap) */
+  p.querySelectorAll("[data-set]").forEach(b => b.onclick = () => {
+    const i = +b.dataset.set;
+    const oo = S.settings.find(x => x.i === i);
+    if (oo && oo.choices && oo.choices.length > 2) { openPick(oo); return; } /* 0.13: a list instead of tapping through */
+    const sw = b.querySelector(".sw"); if (sw) sw.classList.toggle("on"); /* 0.11: the switch moves at once */
+    if (!offline) { act("setting", i); return; }
+    /* 0.10.4: without the game: the next choice here, the game takes it later */
+    const o = S.settings.find(x => x.i === i);
+    if (!o || !o.choices) return;
+    o.idx = ((o.idx || 0) + 1) % o.choices.length; o.value = o.choices[o.idx];
+    pending[i] = o.idx; savePending(); buzz(20);
+    if (themes && themes.length === o.choices.length && themes.every((th, k) => th.name === o.choices[k])) { S.theme = themes[o.idx]; applyTheme(S.theme); }
+    store.set("snap", JSON.stringify(S));
+    drawOffbar(); drawOpts();
+  });
+  if ($("premap")) $("premap").onclick = premap;
+  $("other").onclick = () => { clearTimeout(timer); S = null; showConnect(); };
+}
+/* 0.13: pick one value from a list (designs, phone, ...) */
+function openPick(o) {
+  const box = $("pick"), card = $("pick-card");
+  card.innerHTML = `<h3>${esc(o.label)}</h3>` + o.choices.map((c, k) => `<button class="ch ${k === (o.idx || 0) ? "on" : ""}" data-k="${k}"><span class="rd"></span>${esc(c)}</button>`).join("");
+  box.classList.add("on");
+  box.onclick = e => { if (e.target === box) box.classList.remove("on"); };
+  card.querySelectorAll("[data-k]").forEach(b => b.onclick = async () => {
+    const k = +b.dataset.k; box.classList.remove("on");
+    if (k === (o.idx || 0)) return;
+    buzz(20);
+    o.idx = k; o.value = o.choices[k];
+    if (themes && themes.length === o.choices.length && themes.every((th, j) => th.name === o.choices[j])) { S.theme = themes[k]; applyTheme(S.theme); }
+    if (offline) { pending[o.i] = k; savePending(); store.set("snap", JSON.stringify(S)); drawOffbar(); drawOpts(); return; }
+    drawOpts();
+    const r = await get(`/api/do?a=set&n=${o.i * 16 + k}`);
+    if (!r || r.status !== 200) toast(t("notNow"));
+    setTimeout(() => { clearTimeout(timer); poll(); }, 250);
+  });
+}
+/* 0.10.4: fetch the map pieces of levels 0..5 over the land once; the app keeps every piece it gets */
+let pre = null;
+async function premap() {
+  const list = [];
+  for (let z = 0; z <= 5; z++) {
+    const n = 1 << z, size = WS / n;
+    for (let ty = Math.max(0, Math.floor((Z0 - 1000) / size)); ty <= Math.min(n - 1, Math.floor((Z0 + 11000) / size)); ty++)
+      for (let tx = Math.max(0, Math.floor((-7500 - X0) / size)); tx <= Math.min(n - 1, Math.floor((13500 - X0) / size)); tx++) list.push([z, tx, ty]);
+  }
+  pre = { done: 0, total: list.length };
+  let next = 0, lastDraw = 0;
+  const one = () => new Promise(res => {
+    const [z, x, y] = list[next++], img = new Image();
+    img.onload = img.onerror = () => { pre.done++; res(); };
+    img.src = `${base()}/api/tile?z=${z}&x=${x}&y=${y}&v=${(S && S.mapv) || 1}&k=${encodeURIComponent(code)}`;
+  });
+  const worker = async () => { while (next < list.length && !offline) { await one(); if (page === "opts" && Date.now() - lastDraw > 400) { lastDraw = Date.now(); drawOpts(); } } };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  const ok = pre.done === pre.total;
+  pre = null;
+  if (ok) toast(t("offMapDone"));
+  if (page === "opts") drawOpts();
+}
+
+let meOpen = { stats: false, log: false, prog: false };
+/* 0.13: earnings like a driver app: a week (Monday first) in bars, a day picked, the rides under it */
+const ew = { week: 0, day: -1, open: "" };
+function monday(weeksBack) {
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - 7 * weeksBack);
+  return d;
+}
+function dayName(d, long) { return d.toLocaleDateString(DE ? "de-DE" : "en-GB", long ? { weekday: "long", day: "numeric", month: "long" } : { weekday: "short" }).replace(".", ""); }
+function earnCard() {
+  const all = (book || []).filter(r => r.t > 0);
+  const oldest = all.length ? all[all.length - 1].t * 1000 : Date.now();
+  const maxBack = Math.max(0, Math.ceil((monday(0) - oldest) / (7 * 864e5)));
+  if (ew.week > maxBack) ew.week = maxBack;
+  if (ew.week < 0) ew.week = 0;
+  const m0 = monday(ew.week), m1 = new Date(m0); m1.setDate(m1.getDate() + 7);
+  const inWeek = all.filter(r => r.t * 1000 >= m0 && r.t * 1000 < m1);
+  const days = [0, 0, 0, 0, 0, 0, 0];
+  for (const r of inWeek) days[(new Date(r.t * 1000).getDay() + 6) % 7] += r.pay;
+  const top = Math.max(1, ...days), today = ew.week === 0 ? (new Date().getDay() + 6) % 7 : -1;
+  const pick = ew.day >= 0 ? inWeek.filter(r => (new Date(r.t * 1000).getDay() + 6) % 7 === ew.day) : inWeek;
+  const sum = pick.reduce((a, r) => a + r.pay, 0), tips = pick.reduce((a, r) => a + r.tip, 0), rated = pick.filter(r => r.stars > 0);
+  const avg = rated.length ? (rated.reduce((a, r) => a + r.stars, 0) / rated.length).toFixed(1).replace(".", DE ? "," : ".") + " ★" : "–";
+  const title = ew.week === 0 ? t("week") : ew.week === 1 ? t("lastWeek") : `${t("weekOf")} ${m0.toLocaleDateString(DE ? "de-DE" : "en-GB", { day: "numeric", month: "short" })}`;
+  let h = `<div class="card"><div class="wk"><button data-wk="1" ${ew.week >= maxBack ? "disabled" : ""}>‹</button>
+    <div class="grow"><div class="muted">${t("earn")} · ${ew.day >= 0 ? esc(dayName(new Date(m0.getTime() + ew.day * 864e5), true)) : title}</div><b style="font-size:30px;letter-spacing:-.02em">${money(sum)}</b></div>
+    <button data-wk="-1" ${ew.week <= 0 ? "disabled" : ""}>›</button></div><div class="bars">`;
+  for (let d = 0; d < 7; d++) {
+    const dd = new Date(m0.getTime() + d * 864e5);
+    h += `<button data-day="${d}" class="${days[d] ? "has" : ""} ${ew.day === d || (ew.day < 0 && d === today) ? "on" : ""}"><i style="height:${Math.round(days[d] / top * 100)}%"></i>${esc(dayName(dd))}</button>`;
+  }
+  h += `</div><div class="chips3"><div><span>${t("ridesT")}</span><b>${pick.length}</b></div><div><span>${t("tipT")}</span><b>${money(tips)}</b></div><div><span>${t("avgT")}</span><b>${avg}</b></div></div></div>`;
+  /* the ride book: the picked day, or the week, newest first, by day */
+  h += `<div class="card"><b>${t("bookT")}</b>`;
+  if (!all.length) h += `<div class="muted" style="margin-top:8px">${book ? t("noBook") : (S.log || []).length ? "" : t("noBook")}</div>`;
+  else if (!pick.length) h += `<div class="muted" style="margin-top:8px">${t("noDay")}</div>`;
+  let lastDay = "";
+  for (const r of pick.slice(0, 120)) {
+    const d = new Date(r.t * 1000), key = d.toDateString();
+    if (key !== lastDay && ew.day < 0) {
+      lastDay = key;
+      const diff = Math.round((new Date(new Date().toDateString()) - new Date(key)) / 864e5);
+      h += `<div class="day">${diff === 0 ? t("today") : diff === 1 ? t("yesterday") : esc(dayName(d, true))}</div>`;
+    }
+    const id = String(r.t) + r.pay + r.who, open = ew.open === id;
+    h += `<button class="ride ${open ? "open" : ""}" data-ride="${esc(id)}"><div class="top"><div class="grow"><b class="ell" style="display:block">${r.bus ? "🚌 " : ""}${esc(r.who)}</b>
+      <small class="ell" style="display:block">${d.toLocaleTimeString(DE ? "de-DE" : "en-GB", { hour: "2-digit", minute: "2-digit" })} · ${esc(r.to)}</small></div>
+      <div style="text-align:right;white-space:nowrap"><b>${money(r.pay)}</b><small style="display:block">${r.stars ? "★".repeat(r.stars) : ""}</small></div></div>
+      <div class="more">${[[t("from"), esc(r.from)], [t("to"), esc(r.to)], [t("km"), dist(r.m)], [t("took"), clock(r.s)], [t("tipT"), money(r.tip)],
+        r.car ? [t("car"), esc(r.car)] : null, r.late ? [t("lateT"), t("yes")] : null].filter(Boolean).map(([k, v]) => `<div class="kv"><span>${k}</span><b class="ell">${v}</b></div>`).join("")}</div></button>`;
+  }
+  if (!book && (S.log || []).length) /* an older mod without the book: this session's last jobs */
+    for (const e of S.log) h += `<div class="kv"><span class="ell">${e.bus ? "🚌 " : ""}${esc(e.who)} → ${esc(e.place)}</span><b style="white-space:nowrap">${money(e.pay)} · ${"★".repeat(e.stars)}</b></div>`;
+  return h + `</div>`;
+}
+/* 0.13: progress: the tiers with what they need, the shop's items still to buy, the lines driven */
+function progressCard() {
+  const A = S.account || {};
+  let h = `<div class="card"><button class="fold ${meOpen.prog ? "open" : ""}" data-fold="prog"><b class="grow">${t("progress")}</b><i>›</i></button>`;
+  if (!meOpen.prog) return h + `</div>`;
+  const jobs = (S.jobs || 0) + (S.lines || 0), fmt1 = v => v.toFixed(1).replace(".", DE ? "," : ".");
+  h += `<div style="margin-top:10px" class="muted">${t("tiersT")}</div>`;
+  (A.tiers || []).forEach((tr, i) => {
+    const done = i <= (S.tierNo || 0);
+    const need = i ? `${jobs} / ${tr.jobs} ${t("ridesT")} · ${S.ratings ? fmt1(S.rating) : "–"} / ${fmt1(tr.stars)} ★ · ${t("rep")} ${Math.round(S.rep)} / ${Math.round(tr.rep)}` : "";
+    h += `<div class="tier ${done ? "done" : ""}"><span class="ok">${done ? "✓" : i + 1}</span><div class="grow"><b>${esc(tr.name)}</b>${need ? `<small class="muted" style="display:block">${need}</small>` : ""}</div></div>`;
+  });
+  const left = (S.shop || []).filter(x => !x.bought);
+  h += `<div style="margin-top:14px" class="muted">${t("shopLeft")}</div>`;
+  if (!left.length) h += `<div class="kv"><span>${t("shopAll")}</span></div>`;
+  for (const x of left) h += `<div class="kv"><span class="ell">${esc(x.name)}</span><b style="white-space:nowrap">${money(x.price)}</b></div>`;
+  if (lines && lines.length) {
+    h += `<div style="margin-top:14px" class="muted">${t("linesT")}</div>`;
+    for (const l of lines) h += `<div class="kv"><span class="ell">${esc(l.number)} · ${esc(l.title)}</span><b>${l.done || 0}×</b></div>`;
+  }
+  return h + `</div>`;
+}
+function drawMe() {
+  const p = $("p-me");
+  const sh = S.shift || {}, A = S.account || {};
+  const pct = (a, b) => b ? Math.round(a * 100 / b) + " %" : "–";
+  let h = `<h2>${t("me")}</h2>
+    ${earnCard()}
+    <div class="card hero"><div class="row"><div class="grow"><div class="muted">${t("funds")}</div><div class="pay" style="font-size:30px">${S.money < 0 ? "… CR" : money(S.money)}</div></div>
+      <div style="text-align:right"><div class="muted">${t("tier")}</div><b style="font-size:20px">${esc(S.tier)}</b></div></div>
+      ${A.tierHint ? `<div class="bar" style="background:rgba(255,255,255,.25)"><i style="width:${Math.round((A.tierProgress || 0) * 100)}%;background:currentColor"></i></div><div class="muted" style="margin-top:6px">${t("tierNext")}: ${esc(A.tierHint)}</div>` : ""}</div>
+    <div class="stats">
+    <div class="stat"><span>${t("rep")}</span><b>${Math.round(S.rep)}</b><div class="bar"><i style="width:${Math.round(S.rep)}%"></i></div><div class="muted">${esc(S.repName)}</div></div>
+    <div class="stat"><span>${t("rating")}</span><b>${S.ratings ? S.rating.toFixed(1).replace(".", DE ? "," : ".") + " ★" : "–"}</b><div class="muted">${S.ratings}×</div></div>
+    <div class="stat"><span>${t("jobsDone")} / ${t("linesDone")}</span><b>${S.jobs} / ${S.lines}</b></div>
+    <div class="stat"><span>${t("car")}</span><b class="ell" style="font-size:15px">${S.car.name ? esc(S.car.name) : t("noCar")}</b></div></div>
+    <h2>${t("shift")}</h2><div class="card"><div class="muted">${sh.on ? `${sh.jobs} / ${sh.goal} ${t("shiftNow")} ${money(sh.earned)}` : t("shiftText")}</div>
+    ${sh.on ? `<div class="bar"><i style="width:${Math.min(100, sh.jobs / sh.goal * 100)}%"></i></div>` : ""}
+    <div style="height:10px"></div><button class="btn ${sh.on ? "ghost" : ""}" id="shift" ${S.mode !== "idle" || offline ? "disabled" : ""}>${sh.on ? t("shiftOn") : t("shiftOff")}</button></div>
+    <div class="card"><button class="fold ${meOpen.stats ? "open" : ""}" data-fold="stats"><b class="grow">${t("stats")}</b><i>›</i></button>`;
+  if (meOpen.stats) {
+    const kv = (k, v) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`;
+    h += `<div style="margin-top:8px">` + kv(t("km"), dist(S.km * 1000)) + kv(t("paxT"), A.passengers || 0) + kv(t("tipsT"), money(A.tips || 0)) +
+      kv(t("fiveT"), A.fiveStars || 0) + kv(t("bestT"), money(A.bestPay || 0)) + kv(t("longT"), dist(A.longest || 0)) +
+      kv(t("onTimeT"), pct(A.onTime || 0, (A.onTime || 0) + (A.late || 0))) + kv(t("specialsT"), A.specials || 0) +
+      kv(t("wishesT"), `${A.wishesOk || 0} / ${(A.wishesOk || 0) + (A.wishesFailed || 0)}`) + kv(t("streakT"), A.streak || 0) +
+      kv(t("regularsT"), A.regulars || 0) + kv(t("crashT"), A.crashes || 0) +
+      (sh.on && A.shiftStars ? kv(t("todayT"), `${A.shiftStars.toFixed(1)} ★ · ${t("tipsT")} ${money(A.shiftTips || 0)}`) : "") + `</div>`;
+  }
+  h += `</div>` + progressCard();
+  if (!setH(p, h)) return; /* 0.10.2: unchanged: keep it (a rebuild can swallow a tap) */
+  $("shift").onclick = () => act("shift");
+  p.querySelectorAll("[data-fold]").forEach(b => b.onclick = () => { meOpen[b.dataset.fold] = !meOpen[b.dataset.fold]; drawMe(); });
+  p.querySelectorAll("[data-wk]").forEach(b => b.onclick = () => { ew.week += +b.dataset.wk; ew.day = -1; drawMe(); });
+  p.querySelectorAll("[data-day]").forEach(b => b.onclick = () => { ew.day = ew.day === +b.dataset.day ? -1 : +b.dataset.day; drawMe(); });
+  p.querySelectorAll("[data-ride]").forEach(b => b.onclick = () => { ew.open = ew.open === b.dataset.ride ? "" : b.dataset.ride; drawMe(); });
+}
+
+function drawCard() {
+  const c = S.card, el = $("done");
+  if (!c || c.kind !== 1 && c.kind !== 2 && c.kind !== 3) { el.classList.remove("on"); return; }
+  if (c.serial === seenCard) return;
+  seenCard = c.serial;
+  let h = `<div class="k">${esc(c.title)}</div><div style="font-weight:700;margin-top:4px">${esc(c.name)}</div>`;
+  if (c.money >= 0) h += `<div class="m">${money(c.money)}</div>`;
+  if (c.stars >= 0) h += `<div class="stars">${stars(c.stars)}</div>`;
+  if (c.note) h += `<div class="muted" style="margin-top:8px">„${esc(c.note)}“</div>`;
+  if (c.pairs.length) h += `<div class="pairs">${c.pairs.map(p => `<div><span>${esc(p[0])}</span><b>${esc(p[1])}</b></div>`).join("")}</div>`;
+  h += `<button class="btn" id="done-ok">${t("ok")}</button>`;
+  $("done-card").innerHTML = h;
+  el.classList.add("on");
+  buzz(80);
+  $("done-ok").onclick = () => el.classList.remove("on");
+}
+
+/* ------------------------------------------------------------------ the map: the mod's pieces (tiles) of the map */
+const X0 = -8000, Z0 = 2000, WS = 24576, TS = 256;
+const cv = $("map"), cx = cv.getContext("2d");
+let mv = { x: 2500, z: -4500, zoom: 4.5 }, follow = true, dpr = 1;
+/* 0.10.2: Navi turns the map with the car (heading up, the car low on the screen) */
+let navi = store.get("navi") !== "0", rot = 0, naviK = navi ? 1 : 0, shown = null; /* shown = the car as drawn, glides to the newest state */
+const mapbox = $("mapbox");
+function mapVisible() { return page === "map" || (page === "rides" && S && S.mode !== "idle"); }
+/* the map lives on the Map tab, and during a job also on top of the job tab */
+function placeMap() {
+  const inJob = !!(S && S.mode !== "idle");
+  $("jobmap").classList.toggle("on", inJob);
+  if ($("p-rides").classList.contains("injob") !== inJob) { $("p-rides").classList.toggle("injob", inJob); if (mapbox.parentNode === $("jobmap")) resize(); }
+  const home = page === "rides" && inJob ? $("jobmap") : $("p-map");
+  if (mapbox.parentNode !== home) { home.prepend(mapbox); resize(); }
+  else if (mapVisible()) { followCar(); redraw(); }
+}
+function setNavi(on) {
+  navi = on; store.set("navi", on ? "1" : "0");
+  $("m-navi").classList.toggle("on", on); $("m-plain").classList.toggle("on", !on);
+  if (on) { mv.zoom = Math.max(mv.zoom, 6.3); setFollow(true); }
+  redraw();
+}
+function followCar() { if (follow && shown) { mv.x = shown.x; mv.z = shown.z; } }
+const wrapA = a => Math.atan2(Math.sin(a), Math.cos(a));
+const tiles = new Map();
+/* 0.11.1: at most 6 pieces on the way at once (more swamped the PC while it runs the game, pieces timed out and the
+   map stayed empty); a failed piece is asked for again after 1.5 s */
+let tilesOut = 0;
+function tileImg(z, x, y) {
+  const k = z + "/" + x + "/" + y;
+  let e = tiles.get(k);
+  if (e) { e.used = performance.now(); return e.ok ? e.img : null; }
+  if (tilesOut >= 6) return null; /* the next paint asks again */
+  if (tiles.size > 420) { /* forget the oldest */
+    const old = [...tiles.entries()].filter(a => a[1].ok).sort((a, b) => a[1].used - b[1].used).slice(0, 80);
+    for (const [kk] of old) tiles.delete(kk);
+  }
+  e = { img: new Image(), ok: false, used: performance.now(), tries: 0 };
+  tilesOut++;
+  e.img.onload = () => { tilesOut--; e.ok = true; redraw(); };
+  e.img.onerror = () => { tilesOut--; setTimeout(() => { tiles.delete(k); redraw(); }, 1500); };
+  e.img.src = `${base()}/api/tile?z=${z}&x=${x}&y=${y}&v=${(S && S.mapv) || 1}&k=${encodeURIComponent(code)}`;
+  tiles.set(k, e);
+  return null;
+}
+/* world -> screen (CSS pixels): around the anchor (the middle, or low in Navi), turned by rot */
+function anchor() { return [cv.clientWidth / 2, cv.clientHeight * (0.5 + 0.2 * naviK)]; }
+function scr(x, z) {
+  const s = TS * Math.pow(2, mv.zoom) / WS, [ax, ay] = anchor();
+  const dx = (x - mv.x) * s, dy = (mv.z - z) * s, c = Math.cos(rot), n = Math.sin(rot);
+  return [dx * c + dy * n + ax, -dx * n + dy * c + ay];
+}
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(cv.clientWidth * dpr); cv.height = Math.round(cv.clientHeight * dpr);
+  redraw();
+}
+let raf = 0;
+function redraw() { if (!raf) raf = requestAnimationFrame(paint); }
+function paint() {
+  raf = 0;
+  if (!mapVisible() || !cv.clientWidth) return;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  /* glide: the car between two states, the turn, the Navi blend */
+  let busy = false;
+  if (S && S.car.ok) {
+    if (!shown || Math.hypot(S.car.x - shown.x, S.car.z - shown.z) > 400) shown = { x: S.car.x, z: S.car.z, h: S.car.h };
+    else {
+      shown.x += (S.car.x - shown.x) * 0.22; shown.z += (S.car.z - shown.z) * 0.22; shown.h += wrapA(S.car.h - shown.h) * 0.22;
+      if (Math.hypot(S.car.x - shown.x, S.car.z - shown.z) > 0.3 || Math.abs(wrapA(S.car.h - shown.h)) > 0.003) busy = true;
+    }
+    followCar();
+  }
+  const wantK = navi ? 1 : 0, wantRot = navi && shown ? shown.h : 0;
+  naviK += (wantK - naviK) * 0.18; if (Math.abs(wantK - naviK) < 0.002) naviK = wantK; else busy = true;
+  const dr = wrapA(wantRot - rot); rot = Math.abs(dr) < 0.002 ? wantRot : rot + dr * 0.18; if (Math.abs(dr) >= 0.002) busy = true;
+  rot = wrapA(rot);
+  $("compass").classList.toggle("on", naviK > 0.5);
+  $("needle").setAttribute("transform", `rotate(${-rot * 180 / Math.PI} 20 20)`);
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cx.fillStyle = "#17263C"; cx.fillRect(0, 0, w, h);
+  const [anx, any] = anchor(), sc = TS * Math.pow(2, mv.zoom) / WS;
+  const reach = Math.hypot(Math.max(anx, w - anx), Math.max(any, h - any)) / sc; /* every map point that can be on the screen */
+  /* the pieces: the level just finer than the screen, the coarser ones under it while they load */
+  /* 0.11.1: sharp enough for 2x screens; a 3x phone asked four times as many pieces as it needed */
+  const want = Math.max(0, Math.min(offline ? 5 : 8, Math.round(mv.zoom + Math.log2(Math.min(dpr, 2)) - 0.3))); /* offline: the saved levels */
+  for (let z = Math.max(0, want - 3); z <= want; z++) {
+    const n = 1 << z, size = WS / n;
+    const [ax, az] = [mv.x - reach, mv.z + reach], [bx, bz] = [mv.x + reach, mv.z - reach];
+    const tx0 = Math.max(0, Math.floor((ax - X0) / size)), tx1 = Math.min(n - 1, Math.floor((bx - X0) / size));
+    const ty0 = Math.max(0, Math.floor((Z0 - az) / size)), ty1 = Math.min(n - 1, Math.floor((Z0 - bz) / size));
+    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+      /* the level two coarser is asked for too, so there is always something under the sharp pieces while they come */
+      const img = z === want || (z === want - 2 && z >= 0) ? tileImg(z, tx, ty) : (tiles.get(z + "/" + tx + "/" + ty) || {}).ok ? tiles.get(z + "/" + tx + "/" + ty).img : null;
+      if (!img) continue;
+      const sx = (X0 + tx * size - mv.x) * sc, sy = (mv.z - (Z0 - ty * size)) * sc, sz = size * sc;
+      cx.save(); cx.translate(anx, any); cx.rotate(-rot);
+      cx.imageSmoothingEnabled = true;
+      cx.drawImage(img, sx, sy, sz + 0.5, sz + 0.5);
+      cx.restore();
+    }
+  }
+  if (busy) redraw();
+  if (!S) return;
+  /* the bus line's stops */
+  const j = S.job;
+  if (j && j.kind === "bus") {
+    cx.strokeStyle = "rgba(255,138,61,.55)"; cx.lineWidth = 3; cx.setLineDash([6, 6]); cx.beginPath();
+    j.stops.forEach((s, i) => { const [x, y] = scr(s.x, s.z); i ? cx.lineTo(x, y) : cx.moveTo(x, y); });
+    cx.stroke(); cx.setLineDash([]);
+  }
+  /* 0.11: hotspots as heat zones like a ride app's busy areas: a soft glow, redder the higher the surcharge, and its factor */
+  for (const hs of S.hot || []) {
+    const [x, y] = scr(hs.x, hs.z), r = Math.max(26, 1500 * TS * Math.pow(2, mv.zoom) / WS), k = Math.min(1, Math.max(0, (hs.factor - 1.1) / 0.4));
+    const g = cx.createRadialGradient(x, y, 0, x, y, r), red = Math.round(255), gr = Math.round(150 - 110 * k);
+    /* 0.11.1: close up the zone fills the screen: then only a light tint, so the roads stay readable */
+    const al = Math.min(1, 260 / r);
+    g.addColorStop(0, `rgba(${red},${gr},60,${(.45 * al + .08).toFixed(3)})`); g.addColorStop(0.55, `rgba(${red},${gr},60,${(.22 * al + .05).toFixed(3)})`); g.addColorStop(1, `rgba(${red},${gr},60,0)`);
+    cx.fillStyle = g; cx.beginPath(); cx.arc(x, y, r, 0, 7); cx.fill();
+    const lab = hs.factor.toFixed(1).replace(".", DE ? "," : ".") + "×";
+    cx.font = "800 12px system-ui, sans-serif"; const w = cx.measureText(lab).width + 14;
+    cx.fillStyle = `rgb(${red},${gr},60)`; roundRect(x - w / 2, y - 11, w, 22, 11); cx.fill();
+    cx.fillStyle = "#fff"; cx.textAlign = "center"; cx.textBaseline = "middle"; cx.fillText(lab, x, y + .5);
+  }
+  /* the way */
+  if (S.route && S.route.length >= 4) {
+    for (const [col, wd] of [["#1A3F8F", 9], ["#5B9BFF", 5]]) {
+      cx.strokeStyle = col; cx.lineWidth = wd; cx.lineJoin = cx.lineCap = "round"; cx.beginPath();
+      for (let i = 0; i < S.route.length; i += 2) { const [x, y] = scr(S.route[i], S.route[i + 1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); }
+      cx.stroke();
+    }
+  }
+  /* 0.13: a line from the bus tab */
+  const sl = shownLine >= 0 && lines ? lines.find(x => x.i === shownLine) : null;
+  if (sl) {
+    const way = sl.way && sl.way.length >= 4 ? sl.way : sl.stops.flatMap(s => [s.x, s.z]);
+    for (const [col, wd] of [["rgba(0,0,0,.35)", 8], ["#FF8A3D", 4.5]]) {
+      cx.strokeStyle = col; cx.lineWidth = wd; cx.lineJoin = cx.lineCap = "round"; cx.beginPath();
+      for (let i = 0; i < way.length; i += 2) { const [x, y] = scr(way[i], way[i + 1]); i ? cx.lineTo(x, y) : cx.moveTo(x, y); }
+      cx.stroke();
+    }
+    sl.stops.forEach((s, i) => pin(s.x, s.z, i === 0 ? "#36D399" : "#FF8A3D", String(i + 1), i === 0 || i === sl.stops.length - 1 ? s.name : ""));
+  }
+  /* 0.13: the target for the GPS (set, waiting for the game, or asked for by a tap) */
+  const tg = tapAt || wantTarget || S.target;
+  if (tg) flag(tg.x, tg.z, tapAt ? "#9B8CFF" : "#7C5CFF");
+  if (j && j.kind === "bus") j.stops.forEach((s, i) => pin(s.x, s.z, i < j.stop ? "#596178" : i === j.stop ? "#FF2E7E" : "#FF8A3D", String(i + 1), i === j.stop ? s.name : ""));
+  if (j && j.kind === "ride") {
+    if (j.stage < 2) pin(j.ride.from.x, j.ride.from.z, "#36D399", "", j.ride.from.name);
+    pin(j.ride.to.x, j.ride.to.z, "#FF4D5E", "", j.stage >= 2 ? j.ride.to.name : "");
+  }
+  if (S.mode === "idle") S.offers.forEach((o, i) => pin(o.from.x, o.from.z, "#36D399", String(i + 1), ""));
+  if (S.car.ok && shown) car(shown.x, shown.z, shown.h - rot);
+  /* the scale */
+  const mpp = WS / (TS * Math.pow(2, mv.zoom));
+  const steps = [50, 100, 200, 500, 1000, 2000, 5000, 10000];
+  let m = steps[0]; for (const s of steps) if (s / mpp < 110) m = s;
+  $("scale").innerHTML = `${m >= 1000 ? m / 1000 + " km" : m + " m"}<i style="width:${m / mpp}px"></i>`;
+}
+function pin(x, z, col, label, name) {
+  const [sx, sy] = scr(x, z);
+  cx.fillStyle = "rgba(0,0,0,.35)"; cx.beginPath(); cx.arc(sx, sy + 1, 11, 0, 7); cx.fill();
+  cx.fillStyle = col; cx.beginPath(); cx.arc(sx, sy, 10, 0, 7); cx.fill();
+  cx.strokeStyle = "#fff"; cx.lineWidth = 2; cx.stroke();
+  if (label) { cx.fillStyle = "#fff"; cx.font = "700 11px system-ui, sans-serif"; cx.textAlign = "center"; cx.textBaseline = "middle"; cx.fillText(label, sx, sy + .5); }
+  if (name) {
+    cx.font = "700 12px system-ui, sans-serif"; const w = cx.measureText(name).width + 14;
+    cx.fillStyle = "rgba(14,18,32,.88)"; roundRect(sx - w / 2, sy - 38, w, 22, 6); cx.fill();
+    cx.fillStyle = col; cx.textAlign = "center"; cx.textBaseline = "middle"; cx.fillText(name, sx, sy - 27);
+  }
+}
+function flag(x, z, col) {
+  const [sx, sy] = scr(x, z);
+  cx.fillStyle = "rgba(0,0,0,.3)"; cx.beginPath(); cx.ellipse(sx, sy + 2, 7, 3, 0, 0, 7); cx.fill();
+  cx.strokeStyle = "#fff"; cx.lineWidth = 2.5; cx.beginPath(); cx.moveTo(sx, sy); cx.lineTo(sx, sy - 30); cx.stroke();
+  cx.fillStyle = col; cx.beginPath(); cx.moveTo(sx + 1, sy - 30); cx.lineTo(sx + 20, sy - 24); cx.lineTo(sx + 1, sy - 17); cx.closePath(); cx.fill();
+  cx.strokeStyle = "#fff"; cx.lineWidth = 1.5; cx.stroke();
+}
+function roundRect(x, y, w, h, r) { cx.beginPath(); cx.moveTo(x + r, y); cx.arcTo(x + w, y, x + w, y + h, r); cx.arcTo(x + w, y + h, x, y + h, r); cx.arcTo(x, y + h, x, y, r); cx.arcTo(x, y, x + w, y, r); cx.closePath(); }
+function car(x, z, hd) {
+  const [sx, sy] = scr(x, z);
+  cx.save(); cx.translate(sx, sy); cx.rotate(hd);
+  cx.fillStyle = "rgba(91,155,255,.25)"; cx.beginPath(); cx.arc(0, 0, 22, 0, 7); cx.fill();
+  cx.fillStyle = "#5B9BFF"; cx.strokeStyle = "#fff"; cx.lineWidth = 2.5;
+  cx.beginPath(); cx.moveTo(0, -17); cx.lineTo(12, 12); cx.lineTo(0, 6); cx.lineTo(-12, 12); cx.closePath(); cx.fill(); cx.stroke();
+  cx.restore();
+}
+let tapAt = null;
+function drawMapInfo() {
+  followCar();
+  const info = $("mapinfo"), j = S.job, tg = wantTarget || S.target;
+  const away = p => S.car && S.car.ok ? ` · ${dist(Math.hypot(p.x - S.car.x, p.z - S.car.z))} ${t("awayT")}` : "";
+  if (tapAt) {
+    info.classList.add("on");
+    info.innerHTML = `<div class="row"><div class="grow"><b>${t("targetQ")}</b><div class="muted">${away(tapAt).slice(3)}</div></div>
+      <button class="btn" id="tg-set" style="width:auto;padding:10px 16px">${t("setTarget")}</button><button class="btn ghost" id="tg-no" style="width:auto;padding:10px 14px">✕</button></div>`;
+    $("tg-set").onclick = () => setTarget(tapAt); $("tg-no").onclick = () => { tapAt = null; drawMapInfo(); };
+  } else if (shownLine >= 0 && lines && lines.find(x => x.i === shownLine)) {
+    const l = lines.find(x => x.i === shownLine), last = l.stops[l.stops.length - 1];
+    info.classList.add("on");
+    info.innerHTML = `<div class="row"><div class="grow"><div class="muted">${t("lineShown")}</div><b class="ell" style="display:block">${esc(l.number)} · ${esc(l.title)}</b>
+      <div class="muted">${l.stops.length} ${t("stops")}${last.min !== undefined ? " · " + last.min + " " + t("minT") : ""}</div></div><button class="btn ghost" id="ln-x" style="width:auto;padding:10px 14px">✕</button></div>`;
+    $("ln-x").onclick = () => { shownLine = -1; drawMapInfo(); };
+  } else if (j) {
+    info.classList.add("on");
+    info.innerHTML = `<div class="muted">${esc(j.stageName)}</div><b class="ell" style="display:block">${esc((S.hud && S.hud.tripTo) || "")}</b>
+      <div class="muted">${j.targetM != null ? dist(j.targetM) : ""}${j.timeLeft >= 0 ? " · " + clock(j.timeLeft) : ""} · ${j.sat} %</div>`;
+  } else if (tg) {
+    info.classList.add("on");
+    info.innerHTML = `<div class="row"><div class="grow"><div class="muted">${t("targetT")}</div><b>${wantTarget ? t("targetWait") : t("targetSet")}</b><div class="muted">${away(tg).slice(3)}</div></div>
+      <button class="btn ghost" id="tg-del" style="width:auto;padding:10px 14px">${t("targetDel")}</button></div>`;
+    $("tg-del").onclick = () => { if (wantTarget) { wantTarget = null; store.set("target", ""); } else act("target", -1); if (S) S.target = null; drawOffbar(); drawMapInfo(); };
+  } else info.classList.remove("on");
+  redraw();
+}
+/* 0.13: a target from the map: now with the game, or kept until it runs */
+function setTarget(p) {
+  tapAt = null; buzz(25);
+  if (offline) { wantTarget = { x: Math.round(p.x), z: Math.round(p.z) }; store.set("target", JSON.stringify(wantTarget)); toast(t("targetWait")); drawOffbar(); }
+  else { act("target", tgArg(p.x, p.z)); S.target = { x: p.x, z: p.z }; toast(S.mode === "idle" ? t("targetSet") : t("targetJob")); }
+  drawMapInfo();
+}
+/* screen (CSS pixels) -> world: scr() backwards */
+function world(px, py) {
+  const s = TS * Math.pow(2, mv.zoom) / WS, [ax, ay] = anchor(), c = Math.cos(rot), n = Math.sin(rot);
+  const ux = px - ax, uy = py - ay, dx = ux * c - uy * n, dy = ux * n + uy * c;
+  return { x: mv.x + dx / s, z: mv.z - dy / s };
+}
+/* touch: drag, pinch; the mouse: drag, wheel */
+const ptrs = new Map();
+let pinch0 = null;
+let tap0 = null;
+cv.addEventListener("pointerdown", e => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]); pinch0 = null; tap0 = ptrs.size === 1 ? { x: e.clientX, y: e.clientY, t: Date.now() } : null; });
+cv.addEventListener("pointermove", e => {
+  if (!ptrs.has(e.pointerId)) return;
+  const prev = ptrs.get(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (tap0 && Math.hypot(e.clientX - tap0.x, e.clientY - tap0.y) >= 10) tap0 = null;
+  const s = TS * Math.pow(2, mv.zoom) / WS;
+  if (ptrs.size === 1) {
+    const ddx = (e.clientX - prev[0]) / s, ddy = (e.clientY - prev[1]) / s, c = Math.cos(rot), n = Math.sin(rot);
+    mv.x -= ddx * c - ddy * n; mv.z += ddx * n + ddy * c;
+    setFollow(false);
+  } else if (ptrs.size === 2) {
+    const [a, b] = [...ptrs.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+    if (pinch0) mv.zoom = Math.max(1, Math.min(9, pinch0.zoom + Math.log2(d / pinch0.d)));
+    else pinch0 = { d, zoom: mv.zoom };
+  }
+  redraw();
+});
+const up = e => {
+  ptrs.delete(e.pointerId); pinch0 = null;
+  /* 0.13: a short tap without moving, on the map tab with no job: "target here?" */
+  if (e.type === "pointerup" && tap0 && !ptrs.size && Date.now() - tap0.t < 400 && Math.hypot(e.clientX - tap0.x, e.clientY - tap0.y) < 10 && page === "map" && S && S.mode === "idle") {
+    const r = cv.getBoundingClientRect(), w = world(e.clientX - r.left, e.clientY - r.top);
+    if (w.x > -7600 && w.x < 13600 && w.z < 1100 && w.z > -11100) { tapAt = w; drawMapInfo(); }
+  }
+  tap0 = null;
+};
+cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
+cv.addEventListener("wheel", e => { e.preventDefault(); mv.zoom = Math.max(1, Math.min(9, mv.zoom - e.deltaY / 300)); redraw(); }, { passive: false });
+function setFollow(on) { follow = on; $("m-follow").classList.toggle("on", on); if (on && S) drawMapInfo(); }
+$("m-follow").onclick = () => setFollow(true);
+$("m-navi").onclick = () => setNavi(true);
+$("m-plain").onclick = () => setNavi(false);
+setNavi(navi);
+$("m-in").onclick = () => { mv.zoom = Math.min(9, mv.zoom + 1); redraw(); };
+$("m-out").onclick = () => { mv.zoom = Math.max(1, mv.zoom - 1); redraw(); };
+window.addEventListener("resize", resize);
+
+/* ------------------------------------------------------------------ the tabs */
+/* 0.11: the pill under the chosen tab slides to it */
+const navPill = document.createElement("i"); navPill.className = "pill"; document.querySelector("nav").prepend(navPill);
+function movePill() {
+  const b = document.querySelector("nav button.on"); if (!b) return;
+  const side = getComputedStyle(document.querySelector("nav")).flexDirection === "column";
+  if (side) { navPill.style.width = ""; navPill.style.height = b.offsetHeight + "px"; navPill.style.transform = `translateY(${b.offsetTop}px)`; }
+  else { navPill.style.height = ""; navPill.style.width = b.offsetWidth + "px"; navPill.style.transform = `translateX(${b.offsetLeft}px)`; }
+}
+window.addEventListener("resize", movePill);
+setTimeout(movePill, 50);
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  page = b.dataset.p;
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".page").forEach(x => x.classList.toggle("on", x.id === "p-" + page));
+  movePill();
+  if (S) render();
+  if (mapVisible()) resize();
+});
+
+/* ------------------------------------------------------------------ go */
+if (host && code) start();
+else if (served) /* the game's language for the code screen */
+  fetch("/api/hello").then(r => r.json()).then(h => { DE = h.de ? 1 : 0; showConnect(); }).catch(() => showConnect());
+else showConnect();
+if (APP && APP.version) $("c-title").title = APP.version();
+</script>
+</body>
+</html>

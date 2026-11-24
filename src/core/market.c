@@ -67,6 +67,11 @@ const char *ts_tier_name(int tier, int german) {
     }
 }
 
+void ts_tier_need(int tier, int *jobs, float *stars, float *rep) {
+    if (tier < 0 || tier >= TS_TIERS) tier = 0;
+    *jobs = tier_need[tier].jobs, *stars = tier_need[tier].stars, *rep = tier_need[tier].rep;
+}
+
 static float avg_stars(const TsCore *c) { return c->rating_count ? (float)c->rating_sum / (float)c->rating_count : 0.0f; }
 
 int ts_tier_for(const TsCore *c) {
@@ -88,13 +93,13 @@ float market_tier_progress(const TsCore *c) {
     return m < r ? m : r;
 }
 
-/* what holds the driver back from the next tier, e.g. "noch 4 Aufträge" (empty at the top) */
+/* what holds the driver back from the next tier, e.g. "noch 4 Fahrten" (empty at the top) */
 void market_tier_hint(const TsCore *c, char *out, size_t size) {
     out[0] = 0;
     if (c->tier >= TS_TIERS - 1) return;
     const TierNeed *n = &tier_need[c->tier + 1];
     int jobs = c->jobs_done + c->bus_lines_done;
-    if (jobs < n->jobs) snprintf(out, size, c->german ? "noch %d" : "%d to go", n->jobs - jobs);
+    if (jobs < n->jobs) snprintf(out, size, c->german ? "noch %d Fahrten" : "%d more jobs", n->jobs - jobs);
     else if (avg_stars(c) < n->stars - 0.001f) snprintf(out, size, c->german ? "Ø %.1f nötig" : "needs %.1f avg", (double)n->stars);
     else snprintf(out, size, c->german ? "Ruf %.0f nötig" : "needs rep %.0f", (double)n->rep);
     if (c->german)
@@ -148,7 +153,7 @@ float market_surge(const TsCore *c, int place) {
     for (int i = 0; i < 2; ++i) {
         if (c->hot[i].place < 0 || c->t >= c->hot[i].until) continue;
         if (ts_distance_xz(ts_places[place].pos, ts_places[c->hot[i].place].pos) > HOT_RADIUS) continue;
-        float f = c->hot[i].factor + (c->tier >= TS_TIER_PLATINUM ? 0.1f : 0.0f);
+        float f = c->hot[i].factor + (c->tier >= TS_TIER_PLATINUM ? 0.1f : 0.0f) + (ts_has(c, TS_SHOP_RADAR) ? 0.1f : 0.0f);
         if (f > best) best = f;
     }
     return best;

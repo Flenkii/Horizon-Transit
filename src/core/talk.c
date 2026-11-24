@@ -3,6 +3,7 @@
    with "Voices" on, out loud in the driver's own voice; the passenger is pleased (+3 % satisfaction). Don't press
    it and nothing happens: staying quiet is fine too. At most two questions a ride; never from a quiet passenger. */
 #include "jobs_internal.h"
+#include "companion.h"
 #include <stdio.h>
 
 #define ASK_SECONDS 12.0 /* 0.8: was 9, a little more time for the controller chord */
@@ -118,4 +119,15 @@ void talk_chip(const TsCore *c, char *out, size_t size) {
     if (c->ask < 0) return;
     int left = (int)(c->ask_until - c->t + 0.99);
     snprintf(out, size, "[%s] %s (%d)", c->reply_key[0] ? c->reply_key : "B", T(c, "Antworten", "Reply"), left < 0 ? 0 : left);
+}
+
+/* 0.10: the phone app's reply button: the question waiting and the answer it gives (NULL = none) */
+const char *ts_talk_question(const TsCore *c) {
+    if (c->ask < 0 || c->ask >= ASK_COUNT || c->mode != TS_UBER) return NULL;
+    return pick(c, asks[c->ask].q_de, asks[c->ask].q_en);
+}
+
+const char *ts_talk_answer(const TsCore *c) {
+    if (c->ask < 0 || c->ask >= ASK_COUNT || c->mode != TS_UBER) return NULL;
+    return pick(c, asks[c->ask].a_de, asks[c->ask].a_en);
 }

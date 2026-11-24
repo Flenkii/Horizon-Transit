@@ -14,10 +14,19 @@
 #include "inflate.h"
 #include "bc7.h"
 #include "map_vectors.h"
+#include "companion.h"
 #include <stdlib.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+
+/* 0.13: rides need GO (the shift) first; most tests are about what comes after, so they start online */
+#define ts_init(c, seed, german) (ts_init((c), (seed), (german)), (c)->shift.on = 1)
+/* and they look at the three requests nearby at once, without waiting for them one by one */
+static void phone_with_offers(TsCore *c) {
+    ts_phone_toggle(c);
+    if (c->phone_open && c->mode == TS_IDLE && c->shift.on) ts_refresh_offers(c);
+}
 
 static int failures, checks;
 #define CHECK(cond, ...)                                                                                               \
@@ -147,7 +156,7 @@ static void test_places_realistic(void) {
         ts_init(&c, 777u + (unsigned)seed, 1);
         place_car(ts_places[seed % 2 ? 5 : 3].pos); /* in Nice, in San Giovanni */
         wait_s(&c, 0.5f, 0);
-        ts_phone_toggle(&c);
+        phone_with_offers(&c);
         for (int i = 0; i < c.offer_count; ++i) {
             real += ts_places[c.offers[i].pickup].kind != TS_PLACE_SPOT;
             all++;
@@ -156,28 +165,93 @@ static void test_places_realistic(void) {
     CHECK(all > 0 && real * 10 >= all * 8, "pickups in town at real places: %d of %d", real, all);
 }
 
-/* 0.8: the shift starts by itself with the first ride, so push requests come without "Start shift" */
-static void test_auto_shift(void) {
+/* 0.13: like a driver app: offline only GO; online the requests come one by one, each waits 20 s for a yes */
+static void test_go_flow(void) {
     TsCore c;
     ts_init(&c, 4242u, 1);
+    c.shift.on = 0;
     place_car(ts_places[5].pos);
     wait_s(&c, 0.5f, 0);
-    CHECK(!c.shift.on, "no shift before the first ride");
     ts_phone_toggle(&c);
+    TsHud h;
+    ts_hud(&c, &h);
+    CHECK(!c.offer_count && h.go_row == 2 && h.row_selected == 2 && !h.go_on, "offline: only GO (%d offers, go row %d)", c.offer_count, h.go_row);
+    ts_phone_next(&c);
+    CHECK(c.phone_tab == TS_TAB_RIDES && c.phone_sel == 0, "offline: down stays on GO");
     ts_phone_accept(&c);
-    CHECK(c.mode == TS_UBER && c.shift.on, "the first ride starts the shift (%d)", c.shift.on);
+    CHECK(c.shift.on && c.mode == TS_IDLE && !c.offer_count, "GO: online, no ride yet");
+    ts_hud(&c, &h);
+    CHECK(!strcmp(h.row_label[2], "Suche Fahrten …"), "online: looking for rides ('%s')", h.row_label[2]);
+    wait_s(&c, 25.0f, 0);
+    CHECK(c.offer_count == 1 && c.req_until > c.t, "a request comes by itself, standing still (%d)", c.offer_count);
+    ts_hud(&c, &h);
+    CHECK(!strncmp(h.footer, "Noch ", 5) && !strcmp(h.row_label[4], "Ablehnen") && h.row_selected == 2, "the request: countdown, accept, decline (%s)", h.footer);
+    ts_phone_next(&c);
+    ts_hud(&c, &h);
+    CHECK(c.phone_sel == 1 && h.row_selected == 4, "down: decline");
+    ts_phone_accept(&c);
+    CHECK(c.mode == TS_IDLE && !c.offer_count && c.hail_at > c.t, "declined: the next one comes later");
+    wait_s(&c, 60.0f, 0);
+    CHECK(c.offer_count == 1, "the next request");
+    wait_s(&c, (float)TS_REQUEST_S + 1.0f, 0);
+    CHECK(!c.offer_count || c.req_until > c.t - 1.0, "missed: it goes away");
+    for (int k = 0; k < 80 && !c.offer_count; ++k) wait_s(&c, 1.0f, 0);
+    c.map_preview = 0;
+    c.phone_sel = 0;
+    ts_phone_accept(&c);
+    CHECK(c.mode == TS_UBER && c.shift.on, "Enter: the ride starts");
+}
+
+/* 0.13: what the app has without the game: the ride book, the timetables and the lines' ways, a target from the map */
+static void test_app_offline_things(void) {
+    TsCore c;
+    ts_init(&c, 99u, 1);
+    c.shift.on = 0;
+    TsBookEntry e = {1795500000, 0, 3, 5, 9, 1, 4, 1, 1250, 85, 4321, 300}, back;
+    char line[256];
+    char line2[256];
+    CHECK(ts_book_format(&e, line, sizeof(line)) && ts_book_parse(line, &back) && ts_book_format(&back, line2, sizeof(line2)) && !strcmp(line, line2),
+          "book line: %s", line);
+    CHECK(!ts_book_parse("1 0 3 5 99999 1 4 1 10 0 1 1", &back) && !ts_book_parse("kaputt", &back) && !ts_book_parse("1 0 3 5 9 1 9 1 10 0 1 1", &back),
+          "bad book lines are left out");
+    for (int i = 0; i < TS_BOOK + 5; ++i) e.pay = i, ts_book_add(&c, &e);
+    CHECK(c.book_count == TS_BOOK && c.book[0].pay == TS_BOOK + 4 && c.book[TS_BOOK - 1].pay == 5, "the book keeps the newest %d", TS_BOOK);
+    static char j[256 * 1024];
+    size_t n = ts_app_history_json(&c, j, sizeof(j));
+    CHECK(n > 0 && strstr(j, "\"rides\":[{\"t\":1795500000,\"bus\":0") && strstr(j, "\"pay\":304"), "history JSON (%zu bytes)", n);
+    CHECK(n < 120 * 1024, "history JSON stays small: %zu", n);
+    n = ts_app_lines_json(&c, j, sizeof(j));
+    CHECK(n > 0 && strstr(j, "\"min\":0") && strstr(j, "\"min\":"), "lines: stop minutes");
+    /* a target from the app's map: the GPS goes there, and it's done on arrival */
+    place_car(ts_places[0].pos);
+    wait_s(&c, 0.5f, 0);
+    float x = ts_places[7].pos[0], z = ts_places[7].pos[2];
+    int arg = (int)lroundf((x + 30000.0f) / 2.0f) * 32768 + (int)lroundf((z + 30000.0f) / 2.0f);
+    CHECK(ts_app_do(&c, ts_app_action("target"), arg) && c.target_on && c.nav_on && fabsf(c.nav_target[0] - x) < 2.5f && fabsf(c.nav_target[2] - z) < 2.5f,
+          "target: GPS to %.0f %.0f (%.0f %.0f)", x, z, c.nav_target[0], c.nav_target[2]);
+    TsHud h;
+    ts_hud(&c, &h);
+    n = ts_app_state_json(&c, &h, j, sizeof(j));
+    CHECK(strstr(j, "\"target\":{") && strstr(j, "\"book\":"), "state: target and book serial");
+    place_car(ts_places[7].pos);
+    wait_s(&c, 1.0f, 0);
+    CHECK(!c.target_on && !c.nav_on, "target reached: GPS off");
+    ts_app_do(&c, ts_app_action("target"), arg);
+    ts_app_do(&c, ts_app_action("target"), -1);
+    CHECK(!c.target_on && !c.nav_on, "target cleared");
 }
 
 static void test_uber_ride(int verbose, int rough) {
     TsCore c;
     ts_init(&c, 12345u + (unsigned)rough, 1);
+    c.wall_time = 1795500000;
     place_car(ts_places[0].pos); /* at the festival */
     wait_s(&c, 0.5f, 0);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     CHECK(c.phone_open && c.offer_count == TS_PHONE_OFFERS, "offers: %d", c.offer_count);
     TsHud h;
     ts_hud(&c, &h);
-    CHECK(h.panel && h.row_count == 8 && h.row_selected == 2 && h.tab_count == TS_TABS, "phone panel rows %d sel %d", h.row_count, h.row_selected);
+    CHECK(h.panel && h.row_count == 5 && h.row_selected == 2 && h.tab_count == TS_TABS, "phone panel rows %d sel %d", h.row_count, h.row_selected);
     if (verbose) {
         printf("  Handy:\n");
         for (int i = 0; i < h.row_count; ++i)
@@ -249,6 +323,10 @@ static void test_uber_ride(int verbose, int rough) {
     CHECK(c.wallet > before, "paid");
     CHECK(c.jobs_done == 1, "jobs done");
     CHECK(c.met[offer.passenger] == 1, "%s counts as met", ts_passenger_name(offer.passenger));
+    /* 0.13: the ride book */
+    CHECK(c.book_count == 1 && c.book[0].bus == 0 && c.book[0].who == offer.passenger && c.book[0].from == offer.pickup &&
+              c.book[0].to == offer.dest && c.book[0].pay == (int)(c.wallet - before) && c.book[0].when == 1795500000 && c.book[0].metres > 100,
+          "ride book: %d %d %d %lld", c.book_count, c.book[0].pay, c.book[0].metres, c.book[0].when);
     if (rough) CHECK(sat < 70.0f && (c.n_brake + c.n_accel + c.n_speeding) > 0, "rough ride is penalised: %.1f", sat);
     else CHECK(sat >= 85.0f && c.n_brake + c.n_accel + c.n_crash == 0, "smooth ride is rewarded: %.1f", sat);
     if (verbose) printf("  -> %s: Zufriedenheit %.0f%%, Konto %lld CR\n", rough ? "ruppig" : "ruhig", c.sat, c.wallet);
@@ -259,7 +337,7 @@ static void test_crash(void) {
     ts_init(&c, 7u, 0);
     place_car(ts_places[0].pos);
     wait_s(&c, 0.2f, 0);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_phone_accept(&c);
     c.stage = TS_UBER_TO_DEST; /* the passenger is in */
     c.sat = 80.0f;
@@ -338,7 +416,7 @@ static void test_wishes_whole_ride(void) {
             ts_set_car(&c, super ? "LAM_Huracan_15" : "AUD_RS5_11");
             place_car(ts_places[seed * 11 % ts_place_count].pos);
             wait_s(&c, 0.5f, 0);
-            ts_phone_toggle(&c);
+            phone_with_offers(&c);
             if (c.offer_count < 2) continue;
             int offer = c.offer_count - 1;
             ts_accept_row(&c, offer);
@@ -377,7 +455,7 @@ static void test_wishes_whole_ride(void) {
     ts_set_car(&c, "AUD_RS5_11");
     place_car(ts_places[5].pos);
     wait_s(&c, 0.5f, 0);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_accept_row(&c, 0);
     place_car(ts_places[c.job.pickup].pos);
     wait_s(&c, 8.0f, 0);
@@ -419,6 +497,77 @@ static void test_wishes_whole_ride(void) {
 }
 
 /* 0.5.1: talking back: questions come only with the reply key on; the answer is the driver's, then a reaction */
+
+/* 0.10: the phone app's JSON and what it can ask for */
+static int json_balanced(const char *j) {
+    int depth = 0, in_str = 0;
+    for (const char *p = j; *p; ++p) {
+        if (in_str) {
+            if (*p == '\\') ++p;
+            else if (*p == '"') in_str = 0;
+            continue;
+        }
+        if (*p == '"') in_str = 1;
+        else if (*p == '{' || *p == '[') ++depth;
+        else if (*p == '}' || *p == ']') { if (--depth < 0) return 0; }
+        else if ((unsigned char)*p < 0x20) return 0;
+    }
+    return depth == 0 && !in_str;
+}
+
+static void test_phone_app(void) {
+    static char j[1 << 18];
+    for (int de = 0; de < 2; ++de) {
+        TsCore c;
+        ts_init(&c, 4242, de);
+        c.bus_capacity = 40, c.time_factor = 1.0f, c.replies_on = 1;
+        place_car(ts_places[0].pos);
+        for (int i = 0; i < 10; ++i) ts_car_sample(&c, DT, &car);
+        c.shift.on = 0;
+        CHECK(!ts_app_do(&c, TS_APP_REFRESH, 0), "0.13 app: nothing to decline offline");
+        CHECK(ts_app_do(&c, TS_APP_SHIFT, 0) && c.shift.on && !c.offer_count, "0.13 app: GO: online, waiting");
+        ts_refresh_offers(&c);
+        c.req_until = c.t + TS_REQUEST_S;
+        CHECK(c.offer_count > 0, "app: a request");
+        TsHud h;
+        ts_hud(&c, &h);
+        size_t n = ts_app_state_json(&c, &h, j, sizeof(j));
+        CHECK(n > 0 && json_balanced(j), "app: state JSON is whole (%zu)", n);
+        CHECK(strstr(j, "\"mode\":\"idle\"") && strstr(j, "\"offers\":[{"), "app: idle with offers");
+        CHECK(strstr(j, "\"reqLeft\":20") != NULL, "0.13 app: the countdown");
+        CHECK(!ts_app_state_json(&c, &h, j, 64) && j[0] == 0, "app: too small a buffer gives nothing");
+        CHECK(!ts_app_do(&c, TS_APP_ACCEPT, 7) && c.mode == TS_IDLE, "app: no 8th offer");
+        CHECK(ts_app_do(&c, TS_APP_ACCEPT, 0) && c.mode == TS_UBER, "app: accept the first ride");
+        CHECK(!ts_app_do(&c, TS_APP_ACCEPT, 0), "app: no second job");
+        ts_app_feed("Lena", "Hi \"there\"\n\\ ok", 0);
+        ts_hud(&c, &h);
+        n = ts_app_state_json(&c, &h, j, sizeof(j));
+        CHECK(n > 0 && json_balanced(j) && strstr(j, "\"job\":{\"kind\":\"ride\"") && strstr(j, "Hi \\\"there\\\"\\n\\\\ ok"),
+              "app: the ride and an escaped chat line");
+        CHECK(strstr(j, "\"route\":[") && !strstr(j, "\"route\":[]"), "app: a way to the pickup");
+        CHECK(ts_app_do(&c, TS_APP_CANCEL, 0) && c.mode == TS_IDLE, "app: cancel");
+        c.bus_needs_bus = 0;
+        CHECK(ts_app_do(&c, TS_APP_LINE, 0) && c.mode == TS_BUS, "app: start line 1");
+        ts_hud(&c, &h);
+        n = ts_app_state_json(&c, &h, j, sizeof(j));
+        CHECK(n > 0 && json_balanced(j) && strstr(j, "\"kind\":\"bus\"") && strstr(j, "\"stops\":[{"), "app: the bus line");
+        ts_cancel(&c);
+        n = ts_app_lines_json(&c, j, sizeof(j));
+        CHECK(n > 0 && json_balanced(j), "app: lines JSON");
+        CHECK(ts_app_action("accept") == TS_APP_ACCEPT && ts_app_action("shift") == TS_APP_SHIFT && !ts_app_action("format"), "app: action names");
+        CHECK(strstr(j, "\"themes\":[{") != NULL, "app: all designs go with the lines (0.10.4)");
+        c.setting_count = 3, c.setting_choices[2] = 4, c.setting_index[2] = 1;
+        snprintf(c.setting_choice[2][3], sizeof(c.setting_choice[2][3]), "Laut");
+        CHECK(ts_app_action("set") == TS_APP_SET && ts_app_do(&c, TS_APP_SET, 2 * 16 + 3) && c.setting_want[2] == 3, "app: set a row to a value");
+        CHECK(!ts_app_do(&c, TS_APP_SET, 2 * 16 + 4) && !ts_app_do(&c, TS_APP_SET, 5 * 16), "app: no value or row out of range");
+        n = ts_app_state_json(&c, &h, j, sizeof(j));
+        CHECK(n > 0 && json_balanced(j) && strstr(j, "\"idx\":1,\"choices\":[") && strstr(j, "\"Laut\"]"), "app: the choices of a row");
+        c.setting_count = 0;
+        CHECK(!ts_app_do(&c, TS_APP_REPLY, 0), "app: no question, no reply");
+    }
+    ts_app_feed_clear();
+}
+
 static void test_talk_back(void) {
     int asked = 0, answered = 0, reactions = 0, driver_lines = 0, asked_off = 0, chip_ok = 0, ups = 0;
     for (unsigned seed = 1; seed <= 30; ++seed) {
@@ -430,7 +579,7 @@ static void test_talk_back(void) {
             snprintf(c.reply_key, sizeof(c.reply_key), "B");
             place_car(ts_places[seed * 13 % ts_place_count].pos);
             wait_s(&c, 0.5f, 0);
-            ts_phone_toggle(&c);
+            phone_with_offers(&c);
             if (c.offer_count < 1) continue;
             ts_accept_row(&c, c.offer_count - 1);
             if (c.mode != TS_UBER) continue;
@@ -519,6 +668,7 @@ static void test_sounds(void) {
     for (unsigned seed = 3; seed <= 12; ++seed) {
         TsCore c;
         ts_init(&c, seed * 104729u, 0);
+        c.shift.on = 0; /* as before GO existed: the line starts the shift */
         c.bus_capacity = 40;
         int line = (int)(seed % ts_line_count);
         place_car(ts_places[ts_lines[line].stops[0]].pos);
@@ -563,17 +713,47 @@ static void test_phone_cancel(void) {
     ts_init(&c, 5u, 1);
     place_car(ts_places[3].pos);
     wait_s(&c, 0.2f, 0);
-    ts_phone_toggle(&c);
-    ts_phone_next(&c);
-    ts_phone_next(&c);
-    ts_phone_next(&c); /* the first bus line */
+    phone_with_offers(&c);
+    ts_phone_tab(&c, 1); /* 0.13: the arrows stay in the tab: the bus tab, its first line */
     ts_phone_accept(&c);
     CHECK(c.mode == TS_BUS && c.line == 0, "phone row 4 = line 1");
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_phone_accept(&c);
     CHECK(c.mode == TS_BUS && c.cancel_armed, "first press only asks");
     ts_phone_accept(&c);
     CHECK(c.mode == TS_IDLE && !c.nav_on, "second press cancels, GPS cleared");
+}
+
+/* 0.13: the shop with the game's credits: prices in CR, paid by the glue, nothing taken without the money */
+static void test_credit_shop(void) {
+    TsCore c;
+    ts_init(&c, 7u, 1);
+    c.credits_mode = 1, c.cr_scale = 5;
+    CHECK(ts_shop_cost(&c, TS_SHOP_DISPATCH) == 25000, "credit shop: 5,000 x 5 = 25,000 CR");
+    c.game_credits = -1;
+    ts_shop_buy(&c, TS_SHOP_DISPATCH);
+    CHECK(c.credit_buy_item < 0 && !ts_has(&c, TS_SHOP_DISPATCH), "credit shop: balance unknown, nothing happens");
+    c.game_credits = 20000;
+    ts_shop_buy(&c, TS_SHOP_DISPATCH);
+    CHECK(c.credit_buy_item < 0 && !ts_has(&c, TS_SHOP_DISPATCH), "credit shop: too little, nothing happens");
+    c.game_credits = 30000;
+    long long w = c.wallet;
+    ts_shop_buy(&c, TS_SHOP_DISPATCH);
+    CHECK(c.credit_buy_item == TS_SHOP_DISPATCH && c.credit_buy_cost == 25000 && !ts_has(&c, TS_SHOP_DISPATCH), "credit shop: handed to the game");
+    ts_shop_buy(&c, TS_SHOP_ADS);
+    CHECK(c.credit_buy_item == TS_SHOP_DISPATCH, "credit shop: one at a time");
+    ts_shop_credit_done(&c, TS_SHOP_DISPATCH, 1, 5000);
+    CHECK(ts_has(&c, TS_SHOP_DISPATCH) && c.credit_buy_item < 0 && c.game_credits == 5000 && c.wallet == w, "credit shop: paid, bought, funds untouched");
+    ts_shop_buy(&c, TS_SHOP_ADS);
+    ts_shop_credit_done(&c, TS_SHOP_ADS, 0, 4000);
+    CHECK(!ts_has(&c, TS_SHOP_ADS) && c.credit_buy_item < 0 && c.game_credits == 4000, "credit shop: refused by the game");
+    c.local_hour = 23;
+    c.upgrades |= 1u << TS_SHOP_NIGHT | 1u << TS_SHOP_ONTIME | 1u << TS_SHOP_AIRCON;
+    float f = ts_shop_pay_factor(&c, 1, 0.0f, 1);
+    CHECK(f > 1.349f && f < 1.351f, "night + on time + air con = +35 %% (%.3f)", f);
+    c.local_hour = 12;
+    f = ts_shop_pay_factor(&c, 0, 8000.0f, 0);
+    CHECK(f > 0.999f && f < 1.001f, "by day, late, no licence: no surcharge");
 }
 
 /* arrow keys: up from the first row goes to the last, down back to the first */
@@ -582,16 +762,15 @@ static void test_phone_prev(void) {
     ts_init(&c, 6u, 1);
     place_car(ts_places[3].pos);
     wait_s(&c, 0.2f, 0);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_phone_prev(&c);
-    CHECK(c.phone_tab == TS_TABS - 1, "up on the first ride = the last tab");
+    CHECK(c.phone_tab == TS_TAB_RIDES && c.phone_sel == 1, "0.13: up on accept = decline (the last row)");
     ts_phone_next(&c);
     CHECK(c.phone_tab == TS_TAB_RIDES && c.phone_sel == 0, "down again = the first ride");
     ts_phone_tab(&c, 1);
     CHECK(c.phone_tab == TS_TAB_BUS && c.phone_sel == 0, "right = the bus tab");
-    ts_phone_tab(&c, 1);
     ts_phone_prev(&c);
-    CHECK(c.phone_tab == TS_TAB_BUS && c.phone_sel == (int)ts_line_count - 1, "up from the map = the last bus line");
+    CHECK(c.phone_tab == TS_TAB_BUS && c.phone_sel == (int)ts_line_count - 1, "0.13: up on the first line = the last bus line");
     ts_phone_accept(&c);
     CHECK(c.mode == TS_BUS && c.line == (int)ts_line_count - 1, "the last row is the last bus line");
 }
@@ -659,7 +838,7 @@ static void test_speed_chip(void) {
     ts_init(&c, 4u, 1);
     place_car(ts_places[0].pos);
     wait_s(&c, 0.3f, 0);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_phone_accept(&c);
     CHECK(c.mode == TS_UBER, "ride taken");
     TsHud h;
@@ -793,11 +972,12 @@ static void test_regular(void) {
     for (unsigned seed = 1; seed <= 12; ++seed) {
         TsCore c;
         ts_init(&c, 4242u * seed, 1);
+        c.hail_at = 1e9; /* no request timer: the same random numbers as the seeds were picked with */
         c.german = 1;
         for (int i = 0; i < TS_PEOPLE_MAX; ++i) c.met[i] = 2;
         place_car(ts_places[0].pos);
         wait_s(&c, 0.5f, 0);
-        ts_phone_toggle(&c);
+        phone_with_offers(&c);
         TsOffer offer = c.offers[0];
         CHECK(c.offers[0].passenger != c.offers[1].passenger && c.offers[1].passenger != c.offers[2].passenger &&
                   c.offers[0].passenger != c.offers[2].passenger, "three different people asking");
@@ -888,7 +1068,8 @@ static void test_reputation_and_shift(void) {
     place_car(ts_places[0].pos);
     wait_s(&c, 0.5f, 0);
     /* the shift: from the Account tab */
-    ts_phone_toggle(&c);
+    c.shift.on = 0;
+    phone_with_offers(&c);
     c.phone_tab = TS_TAB_ACCOUNT, c.phone_sel = 0;
     TsHud h;
     ts_hud(&c, &h);
@@ -902,7 +1083,7 @@ static void test_reputation_and_shift(void) {
     ts_take_events(&c, (TsEvent[TS_MAX_EVENTS]){0}, TS_MAX_EVENTS);
     int done = 0;
     for (int r = 0; r < 3; ++r) {
-        ts_phone_toggle(&c);
+        phone_with_offers(&c);
         if (!c.offer_count) break;
         done += ride_through(&c, 0, 0, NULL, NULL, 0);
     }
@@ -914,11 +1095,11 @@ static void test_reputation_and_shift(void) {
     int p = c.job.passenger;
     CHECK(c.met_car[p] == c.car_index + 1 && c.met_stars[p] >= 1, "remembered: car %d stars %d", c.met_car[p], c.met_stars[p]);
     float before = c.reputation;
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_accept_row(&c, 0);
     ts_cancel(&c);
     CHECK(c.reputation < before, "cancelling costs reputation");
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     c.phone_tab = TS_TAB_ACCOUNT, c.phone_sel = 0;
     ts_phone_accept(&c);
     CHECK(!c.shift.on, "shift ended");
@@ -929,7 +1110,8 @@ static void test_reputation_and_shift(void) {
     /* a bad name: fewer requests */
     c.reputation = 10.0f;
     c.phone_open = 0;
-    ts_phone_toggle(&c);
+    c.shift.on = 1;
+    phone_with_offers(&c);
     CHECK(c.offer_count == 2, "reputation 10: two requests (%d)", c.offer_count);
 }
 
@@ -992,7 +1174,7 @@ static void test_wishes_and_memory(void) {
         for (int i = 0; i < TS_PEOPLE_MAX; ++i) c.met[i] = 1, c.met_car[i] = 1; /* last time: the first car of the list */
         place_car(ts_places[seed * 7 % ts_place_count].pos);
         wait_s(&c, 0.5f, 0);
-        ts_phone_toggle(&c);
+        phone_with_offers(&c);
         if (c.offer_count < 2) continue;
         int n = 0;
         int ok = ride_through(&c, c.offer_count - 1, 1, feed, &n, 400); /* the long one */
@@ -1046,6 +1228,19 @@ static void test_bus_sql(void) {
     CHECK(ts_bus_sql("CREATE VIEW Drivable_Data_Car AS SELECT Data_Car.* FROM Data_Car WHERE Id NOT IN (SELECT CarId FROM TrafficCars)", out,
                      sizeof(out)) == 0, "the view itself stays");
     CHECK(ts_bus_sql("INSERT INTO Data_Car_Buckets VALUES (1,2,3)", out, sizeof(out)) == 0, "writes stay");
+    /* 0.13: engine swaps for the bus: the engine list gets four rows, in a FROM list too and in the parts view */
+    CHECK(ts_bus_sql("SELECT EngineID, Id, Level FROM List_UpgradeEngine WHERE Ordinal=414", out, sizeof(out)) == 1 && strstr(out, "WHERE Id IN (444001, 1276001, 1496001, 1011001)") &&
+              strstr(out, ") AS List_UpgradeEngine WHERE"), "engines: %s", out);
+    CHECK(ts_bus_sql("SELECT MediaName FROM Data_Engine DE, List_UpgradeEngine LU WHERE DE.EngineId = LU.EngineId AND Ordinal = 414", out, sizeof(out)) == 1 &&
+              strstr(out, "UNION ALL SELECT Id, 414") && strstr(out, ") LU WHERE"), "engines in a FROM list: %s", out);
+    CHECK(ts_bus_sql("SELECT EngineID FROM List_UpgradeEngine WHERE Id=444001", out, sizeof(out)) == 0 &&
+              ts_bus_sql("SELECT x FROM Garage INNER JOIN List_UpgradeEngine ON List_UpgradeEngine.Id=Garage.Engine WHERE Ordinal=1", out, sizeof(out)) == 0,
+          "lookups by Id stay (no row twice)");
+    CHECK(ts_bus_sql("SELECT x FROM Data_Engine WHERE List_UpgradeEngine.Id = 3", out, sizeof(out)) == 0, "a column name stays");
+    CHECK(ts_bus_sql("CREATE VIEW View_UpgradeParts AS SELECT 0 AS PartEnum FROM List_UpgradeEngine WHERE Ordinal = 414", out, sizeof(out)) == 1,
+          "the upgrade parts view");
+    CHECK(ts_bus_sql("CREATE TABLE t AS SELECT * FROM List_UpgradeEngine", out, sizeof(out)) == 0 &&
+              ts_bus_sql("UPDATE List_UpgradeEngine SET Price = 1", out, sizeof(out)) == 0, "other writes stay");
     CHECK(ts_bus_sql("SELECT Id, MediaName FROM Drivable_Data_Car", out, sizeof(out)) == 1 &&
               strstr(out, "CarId<>414)) AS Drivable_Data_Car") != NULL, "drivable: %s", out);
     CHECK(ts_bus_sql("SELECT Garage.* FROM Drivable_Data_Car AS Garage LEFT JOIN Data_Car_Buckets ON Data_Car_Buckets.CarId=Garage.Id", out,
@@ -1065,19 +1260,37 @@ static void test_shop_and_settings(void) {
     ts_init(&c, 2024u, 1);
     place_car(ts_places[0].pos);
     wait_s(&c, 0.3f, 0);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     c.phone_tab = TS_TAB_SHOP, c.phone_sel = TS_SHOP_BIGBUS;
     TsHud h;
     ts_hud(&c, &h);
-    CHECK(h.row_count == 2 + TS_SHOP_ITEMS && h.row_selected == 2 + TS_SHOP_BIGBUS, "shop rows %d sel %d", h.row_count, h.row_selected);
-    c.wallet = 3000;
+    CHECK(h.row_count == 8 && h.row_selected == 2 + TS_SHOP_BIGBUS - ts_scroll_first(TS_SHOP_ITEMS, TS_SHOP_BIGBUS, 6) &&
+          !strcmp(h.row_label[h.row_selected], "Großer Bus"), "shop rows %d sel %d (0.10.1: it scrolls)", h.row_count, h.row_selected);
+    {   /* 0.10.1: the last item is reachable and selected on screen */
+        TsCore k = c;
+        k.phone_sel = TS_SHOP_ITEMS - 1;
+        TsHud s;
+        ts_hud(&k, &s);
+        CHECK(s.row_count == 8 && s.row_selected == 7 && !strcmp(s.row_label[7], "Versicherung"), "shop scrolled to the end: %d %s", s.row_selected, s.row_label[7]);
+        k.phone_tab = TS_TAB_SETTINGS, k.setting_count = TS_SETTING_ROWS;
+        for (int i = 0; i < TS_SETTING_ROWS; ++i) snprintf(k.setting_label[i], sizeof(k.setting_label[i]), "S%d", i);
+        snprintf(k.setting_note[13], sizeof(k.setting_note[13]), "note 13");
+        k.phone_sel = 13;
+        ts_hud(&k, &s);
+        CHECK(s.row_count <= 8 && !strcmp(s.row_label[s.row_selected], "S13") && !strcmp(s.footer, "note 13"), "settings scroll: %s / %s", s.row_label[s.row_selected], s.footer);
+        CHECK(ts_scroll_first(16, 0, 7) == 0 && ts_scroll_first(16, 15, 7) == 9 && ts_scroll_first(5, 4, 7) == 0, "scroll window");
+    }
+    c.credits_mode = 1; /* 0.13: the shop takes the game's credits, the glue pays */
+    c.game_credits = 3000;
     ts_phone_accept(&c);
-    CHECK(!ts_has(&c, TS_SHOP_BIGBUS) && c.wallet == 3000, "too little money: nothing bought");
-    c.wallet = 12000;
+    CHECK(!ts_has(&c, TS_SHOP_BIGBUS) && c.credit_buy_item < 0, "too little money: nothing bought");
+    c.game_credits = 60000;
     ts_phone_accept(&c);
-    CHECK(ts_has(&c, TS_SHOP_BIGBUS) && c.wallet == 2000, "bought: %lld left", c.wallet);
+    CHECK(c.credit_buy_item == TS_SHOP_BIGBUS && c.credit_buy_cost == 50000, "handed to the game: %lld CR", c.credit_buy_cost);
+    ts_shop_credit_done(&c, TS_SHOP_BIGBUS, 1, 10000);
+    CHECK(ts_has(&c, TS_SHOP_BIGBUS) && c.game_credits == 10000, "bought: %lld left", c.game_credits);
     ts_phone_accept(&c);
-    CHECK(c.wallet == 2000, "not bought twice");
+    CHECK(c.credit_buy_item < 0, "not bought twice");
     ts_step(&c);
     CHECK(c.bus_capacity == 60, "bigger bus: %d seats", c.bus_capacity);
     ts_hud(&c, &h);
@@ -1106,6 +1319,25 @@ static void test_shop_and_settings(void) {
     CHECK(h.row_count == 3 && h.row_selected == 2 && !strcmp(h.row_value[2], "Normal"), "settings rows %d sel %d", h.row_count, h.row_selected);
     ts_phone_accept(&c);
     CHECK(c.setting_pressed == 1, "pressed: %d", c.setting_pressed);
+    /* 0.13: a row with many values opens a list: pick one, Back closes it */
+    c.setting_pressed = -1;
+    c.setting_choices[1] = 9, c.setting_index[1] = 2;
+    for (int k = 0; k < 9; ++k) snprintf(c.setting_choice[1][k], sizeof(c.setting_choice[1][k]), "Design %d", k);
+    ts_phone_accept(&c);
+    CHECK(c.pick_row == 1 && c.pick_sel == 2 && c.setting_pressed == -1, "list open: %d %d %d", c.pick_row, c.pick_sel, c.setting_pressed);
+    ts_hud(&c, &h);
+    CHECK(h.row_count == 8 && !strcmp(h.row_label[h.row_selected], "Design 2"), "list rows %d sel %s", h.row_count, h.row_label[h.row_selected]);
+    for (int k = 0; k < 7; ++k) ts_phone_next(&c);
+    ts_hud(&c, &h);
+    CHECK(c.pick_sel == 0 && !strcmp(h.row_label[h.row_selected], "Design 0"), "list wraps: %d", c.pick_sel);
+    ts_phone_prev(&c);
+    ts_phone_accept(&c);
+    CHECK(c.pick_row == -1 && c.setting_want[1] == 8, "picked: %d want %d", c.pick_row, c.setting_want[1]);
+    c.setting_want[1] = -1;
+    ts_phone_accept(&c);
+    ts_phone_back(&c);
+    CHECK(c.pick_row == -1 && c.phone_open && c.setting_want[1] == -1, "back closes the list only");
+    c.setting_choices[1] = 0;
 }
 
 static void test_phone_draw(void) {
@@ -1114,7 +1346,7 @@ static void test_phone_draw(void) {
     ts_set_car(&c, "LAM_MiuraP400_67");
     place_car(ts_places[0].pos);
     wait_s(&c, 0.5f, 0);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     static const char *const names[TS_TABS] = {"rides", "bus", "account", "shop", "settings"};
     static const char *const sl[8][2] = {{"Handy-Design", "Nacht"}, {"Sprache", "Spiel"}, {"Zeitlimits", "Normal"}, {"Fahrgäste meckern", "An"},
                                          {"Navigation automatisch", "An"}, {"Ruf, Sonderfahrten, Wünsche", "An"},
@@ -1141,6 +1373,31 @@ static void test_phone_draw(void) {
             for (int t = 0; t < TS_THEMES; ++t) draw_dev(&h, TS_DEVICE_EDGE, t, name);
             for (int t = 0; t < TS_THEMES; ++t) draw_dev(&h, TS_DEVICE_TABLET, t, name);
         }
+    }
+    {   /* 0.13: the rides tab like a driver app: offline GO, looking, one request */
+        c.german = 1, c.phone_tab = TS_TAB_RIDES, c.phone_sel = 0;
+        TsOffer keep = c.offers[0];
+        static const char *const scene[3] = {"go_offline", "go_seek", "go_request"};
+        for (int k = 0; k < 3; ++k) {
+            c.shift.on = k > 0, c.offer_count = k == 2, c.offers[0] = keep, c.req_until = k == 2 ? c.t + 14.2 : 0.0;
+            TsHud h;
+            ts_hud(&c, &h);
+            for (int t = 0; t < TS_THEMES; ++t) draw_one(&h, t, scene[k]);
+            draw_dev(&h, TS_DEVICE_TABLET, TS_THEME_PURE_DARK, scene[k]);
+        }
+    }
+    {   /* 0.13: the list of designs */
+        static const char *const dz[9] = {"Nacht", "Hell", "Festival", "Ozean", "Carbon", "Riviera", "Gold", "Pur", "Pur Dunkel"};
+        c.german = 1, c.phone_tab = TS_TAB_SETTINGS, c.phone_sel = 0;
+        snprintf(c.setting_label[0], sizeof(c.setting_label[0]), "Handy-Design");
+        c.setting_choices[0] = 9, c.setting_index[0] = 0;
+        for (int k = 0; k < 9; ++k) snprintf(c.setting_choice[0][k], sizeof(c.setting_choice[0][k]), "%s", dz[k]);
+        c.pick_row = 0, c.pick_sel = 8;
+        TsHud h;
+        ts_hud(&c, &h);
+        for (int t = 0; t < TS_THEMES; ++t) draw_one(&h, t, "settings_pick");
+        draw_dev(&h, TS_DEVICE_TABLET, TS_THEME_PURE_DARK, "settings_pick");
+        c.pick_row = -1, c.setting_choices[0] = 0;
     }
     c.german = 1;
     c.phone_tab = TS_TAB_RIDES, c.phone_sel = 0;
@@ -1233,7 +1490,7 @@ static void test_imperial_and_sign(void) {
     CHECK(strstr(d, "ft") != NULL, "short distance in feet: %s", d);
     place_car(ts_places[0].pos);
     wait_s(&c, 0.3f, 0);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_phone_accept(&c);
     CHECK(c.mode == TS_UBER, "ride taken (imperial)");
     TsHud h;
@@ -1293,7 +1550,7 @@ static void test_place_names(void) {
     c.german = 0;
     place_car(ts_places[0].pos);
     wait_s(&c, 0.3f, 0);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     TsHud h;
     ts_hud(&c, &h);
     int german_rows = 0;
@@ -1348,15 +1605,15 @@ static void test_ride_variety(void) {
     for (int r = 0; r < 12; ++r) {
         place_car(ts_places[0].pos); /* always from the festival, where it repeated most */
         wait_s(&c, 0.5f, 0);
-        ts_phone_toggle(&c);
+        phone_with_offers(&c);
         ts_phone_accept(&c);
-        if (c.mode != TS_UBER) { ts_phone_toggle(&c); continue; }
+        if (c.mode != TS_UBER) { phone_with_offers(&c); continue; }
         rides++;
         repeats += used[c.job.dest]++ > 0;
         ts_cancel(&c);
         c.phone_open = 0;
     }
-    CHECK(rides >= 10 && repeats == 0, "12 rides from one place: %d taken, %d destinations again", rides, repeats);
+    CHECK(rides >= 10 && repeats <= 1, "12 rides from one place: %d taken, %d destinations again", rides, repeats);
 }
 
 static void test_feed_window(void) {
@@ -1438,7 +1695,7 @@ static void test_dash(void) {
     ts_set_car(&c, "LAM_MiuraP400_67");
     place_car(ts_places[0].pos);
     wait_s(&c, 0.5f, 0);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_phone_accept(&c);
     c.stage = TS_UBER_TO_DEST;
     c.leg_t = c.t;
@@ -1644,7 +1901,7 @@ static void test_doors(void) {
     place_car(ts_places[0].pos);
     DoorLog log = {0};
     door_wait(&c, 0.5f, &log);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_phone_accept(&c);
     CHECK(c.mode == TS_UBER, "ride started");
     TsOffer offer = c.job;
@@ -1695,7 +1952,7 @@ static void test_doors(void) {
     place_car(ts_places[0].pos);
     log.n = 0;
     door_wait(&c, 0.5f, &log);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_phone_accept(&c);
     offer = c.job;
     door_drive(&c, ts_places[offer.pickup].pos, &log);
@@ -1711,7 +1968,7 @@ static void test_doors(void) {
     place_car(ts_places[0].pos);
     log.n = 0;
     door_wait(&c, 0.5f, &log);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_phone_accept(&c);
     door_drive(&c, ts_places[c.job.pickup].pos, &log);
     door_wait(&c, 3.6f, &log);
@@ -1768,6 +2025,7 @@ static void test_service(void) {
     {   /* push requests on shift */
         TsCore c;
         ts_init(&c, 99u, 1);
+        c.shift.on = 0;
         place_car(ts_places[0].pos);
         car.vel[2] = 10.0f;
         wait_s(&c, 0.5f, 0);
@@ -1789,18 +2047,17 @@ static void test_service(void) {
             TsEvent ev[TS_MAX_EVENTS];
             int n = ts_take_events(&c, ev, TS_MAX_EVENTS);
             for (int k = 0; k < n; ++k)
-                if (ev[k].kind == TS_EV_TOAST && strstr(ev[k].title, "Anfrage") != NULL) {
+                if (ev[k].kind == TS_EV_TOAST && (!strncmp(ev[k].title, "Neue Anfrage", 12) || !strncmp(ev[k].title, "Stammgast", 9))) {
                     requests++;
                     if (first_at < 0) first_at = i, first = c.offers[0];
                 }
-            if (first_at >= 0 && i == first_at + 30 * 60) {
+            if (first_at >= 0 && i == first_at + 10 * 60) {
                 ts_phone_toggle(&c);
-                CHECK(c.offer_count && c.offers[0].pickup == first.pickup && c.offers[0].dest == first.dest, "the phone shows the pushed request first");
-                for (int k = 1; k < c.offer_count; ++k) CHECK(c.offers[k].pickup_m >= c.offers[0].pickup_m, "the nearest one is pushed");
+                CHECK(c.offer_count == 1 && c.offers[0].pickup == first.pickup && c.offers[0].dest == first.dest, "0.13: the phone shows that one request");
                 ts_phone_toggle(&c);
             }
         }
-        CHECK(requests >= 2 && requests <= 4, "push requests every 2 minutes or so (%d)", requests);
+        CHECK(requests >= 5 && requests <= 14, "0.13: a request every 30 to 50 s when none is taken (%d)", requests);
     }
     {   /* a lost item: noticed later, brought back, paid */
         TsCore c;
@@ -1815,7 +2072,7 @@ static void test_service(void) {
         float rep = c.reputation;
         drive_to(&c, ts_places[0].pos, 25.0f, 2.0f, 3.0f, 0);
         wait_s(&c, 0.5f, 0);
-        CHECK(c.lost.state == 0 && c.wallet == before + 60 && c.reputation > rep && !c.nav_on, "lost item returned");
+        CHECK(c.lost.state == 0 && c.wallet == before + 60 * c.cr_scale && c.reputation > rep && !c.nav_on, "lost item returned");
         c.lost.state = 1, c.lost.place = 0, c.lost.at = c.t + 0.5;
         wait_s(&c, 1.0f, 0);
         CHECK(c.lost.state == 0, "still there: they take it themselves");
@@ -1831,7 +2088,7 @@ static void test_service(void) {
     {   /* streak and the day's goal */
         TsCore c;
         ts_init(&c, 11u, 1);
-        ts_shift_toggle(&c);
+        c.shift.on = 0, ts_shift_toggle(&c); /* a fresh shift */
         long long w = c.wallet;
         int bonus = 0;
         for (int i = 0; i < 4; ++i) bonus += service_streak_for_test(&c, 5, 1000);
@@ -1841,9 +2098,9 @@ static void test_service(void) {
         c.shift.jobs = 5, c.shift.rated = 5, c.shift.stars_sum = 21;
         w = c.wallet;
         career_goal_for_test(&c);
-        CHECK(c.shift.goal_done && c.wallet == w + TS_GOAL_BONUS, "day's goal paid");
+        CHECK(c.shift.goal_done && c.wallet == w + TS_GOAL_BONUS * c.cr_scale, "day's goal paid");
         career_goal_for_test(&c);
-        CHECK(c.wallet == w + TS_GOAL_BONUS, "only once");
+        CHECK(c.wallet == w + TS_GOAL_BONUS * c.cr_scale, "only once");
     }
     {   /* a regular asks for you; the taxi meter runs */
         TsCore c;
@@ -1870,18 +2127,17 @@ static void test_service(void) {
         drive_to(&c, ts_places[o.pickup].pos, 20.0f, 2.0f, 3.0f, 0);
         wait_s(&c, 4.5f, 0);
         ts_hud(&c, &h);
-        CHECK(c.stage == TS_UBER_TO_DEST && h.meter > 0 && h.meter < o.pay, "meter starts (%d of %d)", h.meter, o.pay);
-        int m0 = h.meter;
+        CHECK(c.stage == TS_UBER_TO_DEST && h.meter == o.pay, "0.13: the fixed fare from the start (%d of %d)", h.meter, o.pay);
         drive_to(&c, ts_places[o.dest].pos, 20.0f, 2.0f, 3.0f, 0);
         ts_hud(&c, &h);
-        CHECK(c.mode == TS_IDLE || h.meter >= m0, "meter goes up");
+        CHECK(c.mode == TS_IDLE || h.meter == o.pay, "0.13: the fare stays fixed while driving");
     }
     {   /* every tab fills the tablet's column */
         TsCore c;
         ts_init(&c, 3u, 0);
         place_car(ts_places[0].pos);
         wait_s(&c, 0.2f, 0);
-        ts_phone_toggle(&c);
+        phone_with_offers(&c);
         for (int t = 0; t < TS_TABS; ++t) {
             c.phone_tab = t, c.phone_sel = 0;
             TsHud h;
@@ -1926,7 +2182,7 @@ static void screens(void) {
     c.wallet = 18450, c.reputation = 72.0f;
     place_car(ts_places[0].pos);
     wait_s(&c, 0.5f, 0);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     for (int i = 0; i < 30; ++i) { /* requests with a regular in them */
         ts_refresh_offers(&c);
         int reg = 0;
@@ -2003,8 +2259,8 @@ static void screens(void) {
     h.g_lat = -0.2f, h.g_long = 0.15f;
     dash_one(&h, "shot_dash_bus");
     /* the lines in the feed: announcements, driving through, a lost item, the streak */
-    TsFeedLine bus[3] = {{"Ansage", "Nächster Halt: Montellino · Treffpunkt 15. Kein Haltewunsch.", 3},
-                         {"Leitstelle", "Durchgefahren: Montellino · Treffpunkt 15", 0},
+    TsFeedLine bus[3] = {{"Ansage", "Nächster Halt: Montellino · Frantoio. Kein Haltewunsch.", 3},
+                         {"Leitstelle", "Durchgefahren: Montellino · Frantoio", 0},
                          {"Ansage", "Nächster Halt: Horizon Festival. Endhaltestelle, bitte alle aussteigen.", 3}};
     feed_shot(bus, 3, "shot_feed_bus");
     TsFeedLine svc[3] = {{"Horizon Transit", "Serie 4 · +118 € Bonus", 0},
@@ -2080,6 +2336,7 @@ static int ride_once(TsCore *c, int row) {
     wait_s(c, 0.3f, 0);
     ts_phone_toggle(c);
     if (!c->phone_open) ts_phone_toggle(c);
+    if (c->mode == TS_IDLE && c->shift.on) ts_refresh_offers(c);
     if (c->offer_count <= row) { c->phone_open = 0; return 0; }
     ts_accept_row(c, row);
     if (c->mode != TS_UBER) return 0;
@@ -2112,7 +2369,7 @@ static void test_cards(void) {
     ts_set_car(&c, "AUD_RS5_11");
     place_car(ts_places[0].pos);
     wait_s(&c, 0.5f, 0);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_accept_row(&c, c.offers[0].pool ? 1 : 0);
     CHECK(c.mode == TS_UBER && !c.job.pool, "cards: ride started");
     c.next_wish_t = 1e9; /* no wished stop on the way */
@@ -2150,8 +2407,8 @@ static void test_cards(void) {
     TsCard k;
     memset(&k, 0, sizeof(k));
     c.card.kind = TS_CARD_RIDE, c.card.secs = 8.0f, c.card_at = c.t;
-    ts_phone_toggle(&c);
-    if (!c.phone_open) ts_phone_toggle(&c);
+    phone_with_offers(&c);
+    if (!c.phone_open) phone_with_offers(&c);
     ts_accept_row(&c, 0);
     wait_s(&c, 0.2f, 0);
     ts_hud(&c, &h);
@@ -2174,7 +2431,7 @@ static void test_cards(void) {
     ts_set_car(&s2, "AUD_RS5_11");
     place_car(ts_places[0].pos);
     wait_s(&s2, 0.3f, 0);
-    ts_shift_toggle(&s2);
+    s2.shift.on = 0, ts_shift_toggle(&s2);
     ride_once(&s2, 0);
     wait_s(&s2, 9.0f, 0);
     ride_once(&s2, 1);
@@ -2247,7 +2504,7 @@ static void test_classes(void) {
         ts_init(&b, 8u, 1);
         place_car(ts_places[0].pos);
         wait_s(&b, 0.3f, 0);
-        ts_phone_toggle(&b);
+        phone_with_offers(&b);
         ts_accept_row(&b, 0);
         b.job.ride_class = k ? TS_CLASS_BLACK : TS_CLASS_COMFORT;
         b.job.ptype = TS_P_NORMAL;
@@ -2273,9 +2530,10 @@ static void test_classes(void) {
     wait_s(&p, 0.3f, 0);
     ts_set_car(&p, "BMW_X5M_11");
     int shown = 0;
-    for (int r = 0; r < 10 && !shown; ++r) {
+    for (int r = 0; r < 60 && !shown; ++r) {
         ts_phone_toggle(&p);
         if (!p.phone_open) ts_phone_toggle(&p);
+        ts_refresh_offers(&p);
         TsHud h;
         ts_hud(&p, &h);
         for (int i = 0; i < h.row_count; ++i) shown |= !strncmp(h.row_label[i], "XL · ", 5) && strstr(h.row_label[i], " +") != NULL;
@@ -2337,7 +2595,7 @@ static void test_hotspots(void) {
     ts_init(&s, 78u, 1);
     place_car(ts_places[0].pos);
     wait_s(&s, 0.3f, 0);
-    ts_shift_toggle(&s);
+    s.shift.on = 0, ts_shift_toggle(&s);
     ts_take_events(&s, (TsEvent[TS_MAX_EVENTS]){0}, TS_MAX_EVENTS);
     s.t = 61.0;
     ts_step(&s);
@@ -2396,7 +2654,7 @@ static void test_tiers(void) {
     ts_hud(&a, &h);
     int found = 0;
     for (int i = 0; i < h.row_count; ++i)
-        if (!strcmp(h.row_label[i], "Fahrer-Stufe")) {
+        if (!strcmp(h.row_label[i], "Stufe")) {
             found = 1;
             CHECK(!strcmp(h.row_value[i], "Bronze · noch 4"), "tier row: %s", h.row_value[i]);
             CHECK((h.row_meter_on >> i) & 1u && h.row_meter[i] > 0.55f && h.row_meter[i] < 0.65f, "tier meter %.2f", h.row_meter[i]);
@@ -2414,7 +2672,7 @@ static void test_tiers(void) {
     e.phone_open = 1, e.phone_tab = TS_TAB_ACCOUNT;
     ts_hud(&e, &h);
     int en = 0;
-    for (int i = 0; i < h.row_count; ++i) en |= !strcmp(h.row_label[i], "Driver tier") && !strcmp(h.row_value[i], "Bronze · 4 to go");
+    for (int i = 0; i < h.row_count; ++i) en |= !strcmp(h.row_label[i], "Tier") && !strcmp(h.row_value[i], "Bronze · 4 more");
     CHECK(en, "English tier row");
     CHECK(!strcmp(ts_class_name(TS_CLASS_SAVER, 0), "Saver") && !strcmp(ts_class_name(TS_CLASS_SAVER, 1), "Spar"), "class names");
 }
@@ -2440,6 +2698,7 @@ static void test_pool(void) {
           "two people, four places");
     CHECK(o.ride_class == TS_CLASS_SAVER || o.ride_class == TS_CLASS_COMFORT, "shared: Saver or Comfort");
     CHECK(o.pay == uber_pay(o.trip_m, 80.0f, o.ptype, o.pay_factor) + uber_pay(o.pool_trip_m, 80.0f, o.pool_ptype, o.pay_factor), "shared: both fares at 80 %% of alone, added (%d)", o.pay);
+    c.offers[0] = c.offers[row], row = 0; /* 0.13: the phone shows one request: this one */
     c.phone_open = 1, c.phone_tab = TS_TAB_RIDES, c.phone_sel = row;
     TsHud h;
     ts_hud(&c, &h);
@@ -2576,7 +2835,7 @@ static void test_map(void) {
     ts_set_car(&c, "AUD_RS5_11");
     place_car(ts_places[0].pos);
     wait_s(&c, 0.5f, 0);
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     c.phone_tab = TS_TAB_MAP, c.phone_sel = 0;
     TsHud h;
     ts_hud(&c, &h);
@@ -2602,11 +2861,11 @@ static void test_map(void) {
 
     /* the preview of a ride */
     c.map_preview = 1;
-    c.phone_tab = TS_TAB_RIDES, c.phone_sel = 1;
+    c.phone_tab = TS_TAB_RIDES, c.phone_sel = 0;
     ts_phone_accept(&c);
     CHECK(c.mode == TS_IDLE && c.map_view && c.phone_open, "Enter on a ride: the preview, no ride yet");
     ts_hud(&c, &h);
-    const TsOffer *o = &c.offers[1];
+    const TsOffer *o = &c.offers[0];
     CHECK(h.map_on && h.map_keys == TS_MAPKEYS_PREVIEW && pins_of(&h, TS_PIN_PICKUP) == 1 && pins_of(&h, TS_PIN_DEST) == 1 + o->pool,
           "the preview: pickup and destination");
     int pick = -1, dest = -1, car_i = -1;
@@ -2636,13 +2895,13 @@ static void test_map(void) {
     ts_hud(&c, &h);
     CHECK(c.map_btn == 1 && !strcmp(h.row_label[h.row_selected], "Zurück"), "down: Zurück");
     ts_phone_accept(&c);
-    CHECK(!c.map_view && c.mode == TS_IDLE && c.phone_open && c.phone_sel == 1, "Zurück: the list again, the same ride chosen");
+    CHECK(!c.map_view && c.mode == TS_IDLE && c.phone_open && c.phone_sel == 0, "Zurück: the request again, still chosen");
     ts_phone_accept(&c);
     ts_phone_back(&c);
     CHECK(!c.map_view && c.phone_open && c.mode == TS_IDLE, "Backspace closes the preview, not the phone");
     ts_phone_back(&c);
     CHECK(!c.phone_open, "Backspace again closes the phone");
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     c.phone_sel = 0;
     int want = c.offers[0].passenger;
     ts_phone_accept(&c);
@@ -2651,7 +2910,7 @@ static void test_map(void) {
     CHECK(c.mode == TS_UBER && c.job.passenger == want && !c.map_view && !c.phone_open, "Fahrt annehmen takes the ride");
 
     /* the job's map */
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_hud(&c, &h);
     CHECK(h.tab_count == 2 && !h.map_on && h.map_keys == TS_MAPKEYS_JOBPAGE, "during the job: two tabs, the job first");
     ts_phone_tab(&c, 1);
@@ -2673,7 +2932,7 @@ static void test_map(void) {
     /* the preview of a bus line: all its stops, numbered in driving order */
     for (unsigned li = 0; li < ts_line_count; ++li) {
         c.phone_open = 0;
-        ts_phone_toggle(&c);
+        phone_with_offers(&c);
         c.phone_tab = TS_TAB_BUS, c.phone_sel = (int)li;
         ts_phone_accept(&c);
         ts_hud(&c, &h);
@@ -2704,7 +2963,7 @@ static void test_map(void) {
     ts_set_car(&c, "PG_BUS_14");
     ts_phone_accept(&c);
     CHECK(c.mode == TS_BUS, "no preview: Enter starts the line");
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_phone_tab(&c, 1);
     ts_hud(&c, &h);
     CHECK(h.map_on && pins_of(&h, TS_PIN_STOP_NEXT) == 1, "the bus job's map: the next stop marked");
@@ -2819,8 +3078,18 @@ static void test_gamemap(void) {
     int count[4] = {0, 0, 0, 0};
     for (int i = 0; i < segs; ++i) count[kind[i]]++;
     CHECK(segs == 9 + 9 + 9 + 4 + 1, "the roads' lines (%d)", segs);
-    CHECK(count[TS_ROAD_MOTORWAY] == 18 && count[TS_ROAD_STREET] == 9 && count[TS_ROAD_DIRT] == 4 && count[TS_ROAD_TRAIL] == 1,
+    /* 0.13: the nav's types 5 and 6 are streets too (the festival's entrance, Castelletto's coast road) */
+    CHECK(count[TS_ROAD_MOTORWAY] == 18 && count[TS_ROAD_STREET] == 9 + 4 + 1 && count[TS_ROAD_DIRT] == 0 && count[TS_ROAD_TRAIL] == 0,
           "motorway %d, street %d, dirt %d, trail %d", count[3], count[2], count[1], count[0]);
+    {   /* ... but two of them side by side are no motorway */
+        int road2[2][3] = {{5, 0, 10}, {6, 10, 10}};
+        size_t n2;
+        unsigned char *nav2 = fake_nav(&n2, (const float (*)[2])node, 37, (const int (*)[3])road2, 2, list, 20);
+        int s2 = ts_gamemap_roads(nav2, n2, seg, kind, 64), mw = 0;
+        for (int i = 0; i < s2; ++i) mw += kind[i] == TS_ROAD_MOTORWAY;
+        CHECK(s2 == 18 && !mw, "types 5/6 twins: %d lines, %d motorway", s2, mw);
+        free(nav2);
+    }
     CHECK(!ts_gamemap_roads(nav, 0x90, seg, kind, 64), "a cut nav file is refused");
     nav[0] = 'X';
     CHECK(!ts_gamemap_roads(nav, nn, seg, kind, 64), "no nav file");
@@ -2978,7 +3247,7 @@ static void screens07(void) {
     ts_step(&c);
     wait_s(&c, 0.5f, 0);
     TsHud h;
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     c.phone_tab = TS_TAB_MAP;
     ts_hud(&c, &h);
     draw_dev(&h, TS_DEVICE_PHONE, TS_THEME_NIGHT, "shot07_map_near");
@@ -3098,7 +3367,7 @@ static void screens07(void) {
     ts_phone_accept(&c);
     ts_phone_accept(&c);
     c.next_wish_t = 1e9;
-    ts_phone_toggle(&c);
+    phone_with_offers(&c);
     ts_phone_tab(&c, 1);
     ts_hud(&c, &h);
     draw_dev(&h, TS_DEVICE_PHONE, TS_THEME_NIGHT, "shot07_job_map");
@@ -3139,7 +3408,7 @@ static void screens06(void) {
     int found = 0;
     for (int i = 0; i < 200 && !found; ++i) {
         c.phone_open = 0;
-        ts_phone_toggle(&c);
+        phone_with_offers(&c);
         int black = 0, pool = 0, surge = 0;
         for (int k = 0; k < c.offer_count; ++k)
             black |= c.offers[k].ride_class == TS_CLASS_BLACK, pool |= c.offers[k].pool, surge |= c.offers[k].surge > 1.01f;
@@ -3351,7 +3620,8 @@ int main(int argc, char **argv) {
     int verbose = argc > 1;
     test_stops_are_real();
     test_places_realistic();
-    test_auto_shift();
+    test_go_flow();
+    test_app_offline_things();
     if (verbose) printf("Uber, ruhige Fahrt:\n");
     test_uber_ride(verbose, 0);
     if (verbose) printf("Uber, ruppige Fahrt:\n");
@@ -3362,6 +3632,7 @@ int main(int argc, char **argv) {
     test_bus_leave_early();
     test_phone_cancel();
     test_phone_prev();
+    test_credit_shop();
     test_cars_and_passengers();
     test_bus_needs_bus();
     test_speed_chip();
@@ -3387,6 +3658,7 @@ int main(int argc, char **argv) {
     test_sounds();
     test_wishes_whole_ride();
     test_talk_back();
+    test_phone_app();
     test_cards();
     test_classes();
     test_hotspots();

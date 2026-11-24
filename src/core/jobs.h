@@ -6,6 +6,7 @@
    The game glue (src/mod.c) feeds it the own car's state from the game's car update and asks it
    every 100 ms what to show and where the GPS should point. One TsCore, guarded by the glue's lock. */
 
+#include <stddef.h>
 #include <stdint.h>
 #include "cars.h"
 #include "people.h"
@@ -34,10 +35,15 @@ enum { TS_WISH_NONE = 0, TS_WISH_SLOWER, TS_WISH_SMOOTH, TS_WISH_FASTER, TS_WISH
 
 /* the phone's tabs while no job runs */
 enum { TS_TAB_RIDES = 0, TS_TAB_BUS, TS_TAB_MAP, TS_TAB_ACCOUNT, TS_TAB_SHOP, TS_TAB_SETTINGS, TS_TABS }; /* 0.7: the map */
-#define TS_SETTING_ROWS 8
+#define TS_SETTING_ROWS 16 /* 0.10.1: every setting of the mod menu (the phone scrolls) */
 
 /* what the company can buy (shop.c), bits of TsCore.upgrades */
-enum { TS_SHOP_DISPATCH = 0, TS_SHOP_ADS, TS_SHOP_COMFORT, TS_SHOP_BIGBUS, TS_SHOP_PREMIUM, TS_SHOP_ITEMS };
+/* 0.10.1: tip box, customer file, shift planner, ticket machine */
+enum { TS_SHOP_DISPATCH = 0, TS_SHOP_ADS, TS_SHOP_COMFORT, TS_SHOP_BIGBUS, TS_SHOP_PREMIUM, TS_SHOP_TIPS, TS_SHOP_REGULARS,
+       TS_SHOP_PLANNER, TS_SHOP_TICKETS,
+       /* 0.13 */
+       TS_SHOP_SNACKS, TS_SHOP_DASHCAM, TS_SHOP_ONTIME, TS_SHOP_LONGHAUL, TS_SHOP_RADAR, TS_SHOP_NIGHT, TS_SHOP_AIRCON,
+       TS_SHOP_BILLBOARD, TS_SHOP_INSURANCE, TS_SHOP_ITEMS };
 
 enum {
     TS_UBER_TO_PICKUP = 0, /* drive to the passenger */
@@ -96,6 +102,17 @@ typedef struct {
     int pool_passenger, pool_pickup, pool_dest, pool_ptype;
     float pool_trip_m;  /* the second passenger's road metres, their pickup to their destination */
 } TsOffer;
+
+/* 0.13: the ride book (the glue saves it): every job with its date, newest first, for the app's earnings and history */
+#define TS_BOOK 300
+typedef struct {
+    long long when;          /* unix seconds from the glue's clock (TsCore.wall_time), 0 = not known */
+    short bus, who, from, to; /* bus: 0 a ride, 1 a line; who: the passenger / the line; from, to: places */
+    short car;               /* index in ts_cars + 1, 0 = not known */
+    unsigned char stars, late;
+    int pay, tip;            /* CR: all of it (bonus too); the part above the plain fare */
+    int metres, seconds;
+} TsBookEntry;
 
 /* 0.5: the logbook (the tablet shows it): the last jobs, newest first, not saved */
 #define TS_LOG 5
@@ -173,7 +190,7 @@ typedef struct {
     float g_lat, g_long;             /* sideways (+ right) and forward (+ gas, - braking), 1.0 = the passenger's limit */
     int g_over;                      /* outside the circle now */
     /* 0.5 */
-    int meter;                       /* the taxi meter / the bus's fares so far, in €, -1 = none */
+    int meter;                       /* the taxi meter / the bus's fares so far, in CR, -1 = none */
     char meter_label[16];            /* "TAXAMETER" / "FARES" */
     char detail_title[64];           /* the tablet's right column: a title, then pairs, a route or text */
     int detail_count;
@@ -204,7 +221,17 @@ typedef struct {
     float map_navi_t;                /* 0.9.1: 0..1, the blue dot becoming the navi arrow and the compass (the window eases it) */
     int map_pin_count;
     TsMapPin map_pin[TS_MAP_PINS];
+    /* 0.12: the phone app's new look (like the Android app): which page, the head's car and money, the shift's GO */
+    int page;                        /* TS_PAGE_ */
+    char head_sub[48];               /* under the app's name: the car */
+    char money[24], money_label[24]; /* the game account in the head ("184.500 CR", "Spielkonto") */
+    int go_row;                      /* the shift's row (a GO card), -1 none */
+    int go_on;                       /* the shift runs */
+    char go_title[32], go_text[64];  /* "Du bist offline", "Starte eine Schicht ..." */
+    int speed_now;                   /* the car's speed in the shown unit, -1 = unknown */
+    char speed_unit[8];
 } TsHud;
+enum { TS_PAGE_RIDES = 0, TS_PAGE_BUS, TS_PAGE_MAP, TS_PAGE_ACCOUNT, TS_PAGE_SHOP, TS_PAGE_SETTINGS, TS_PAGE_JOB, TS_PAGE_JOBMAP };
 
 typedef struct {
     /* settings */
@@ -222,7 +249,14 @@ typedef struct {
     /* the phone's Settings tab: the glue fills the rows (its own settings) and acts on a press */
     char setting_label[TS_SETTING_ROWS][40], setting_value[TS_SETTING_ROWS][24];
     int setting_count;
+    int pick_row, pick_sel; /* 0.13: the list of one setting's values is open (-1 none), its selection */
     int setting_pressed;  /* the row Enter was pressed on, -1 none (the glue takes it) */
+    char setting_note[TS_SETTING_ROWS][100]; /* 0.10.1: the footer while that row is selected ("" = the usual one) */
+    /* 0.10.4: each row's choices (the glue fills them), so the phone app can show and change them without the game;
+       setting_want: the value the app asked for, -1 none (the glue takes it) */
+    int setting_index[TS_SETTING_ROWS], setting_choices[TS_SETTING_ROWS], setting_want[TS_SETTING_ROWS];
+    char setting_choice[TS_SETTING_ROWS][12][24]; /* 0.13: 12 (9 designs did not fit in 8) */
+    int app_theme;        /* 0.10.1: the phone's design (TS_THEME_), the phone app takes it over (glue) */
 
     uint32_t rng;
     double t;             /* game seconds (sum of the car update's dt: stops while the game pauses) */
@@ -283,6 +317,16 @@ typedef struct {
     float nav_target[3];
     unsigned nav_serial;
     int gps_arrived;      /* the game's GPS says the destination is reached (glue) */
+
+    /* 0.13: the shop with the game's credits (set by the glue): credits_mode on = the game's functions were found;
+       purchases are paid from the game account; game_credits = its balance (-1 unknown); a purchase waits in credit_buy_item
+       (-1 none) for the glue, which pays on the game's thread and answers with ts_shop_credit_done */
+    int credits_mode;
+    long long game_credits;
+    int credit_buy_item;
+    long long credit_buy_cost;
+    int local_hour; /* the PC's hour (-1 unknown): the night surcharge */
+    int cr_scale;   /* 0.13: all money is the game's credits: every amount of the old € scale times this (INI [Credits] Scale, 5) */
 
     /* stats (saved by the glue) */
     long long wallet;
@@ -351,8 +395,7 @@ typedef struct {
     double bell_at;       /* 0.5.1: when a passenger presses the stop button (after the announcement), 0 = not */
     int bell_stop;        /* ... for this stop (c->stop_i) */
     double hail_at;       /* on shift: when the next push request comes */
-    int offers_hailed;    /* 0.8: the offers came with a push request (the phone keeps them a minute) */
-    double offers_t;      /* when the offers were made (a push request's offers stay when the phone opens) */
+    double req_until;     /* 0.13: like a driver app: the one request on the phone runs out then (0 = none) */
     int streak;           /* jobs in a row with 4 or 5 stars */
     struct {
         int state;        /* 0 none, 1 noticed soon, 2 bring it back */
@@ -361,6 +404,13 @@ typedef struct {
     } lost;               /* a passenger left something in the car */
     TsLogEntry log[TS_LOG];
     int log_count;
+    /* 0.13: the ride book and the glue's clock; a target picked on the app's map (the GPS takes it while free) */
+    TsBookEntry book[TS_BOOK];
+    int book_count;
+    unsigned book_serial;    /* +1 per entry (the glue saves, the app reloads) */
+    long long wall_time;     /* the glue: unix seconds now (0 = not known) */
+    int target_on;
+    float target[3];
 
     /* 0.6 */
     int cards_on;         /* the glue shows cards in the ride panel (else the payout is a pop-up as before) */
@@ -430,6 +480,9 @@ void ts_cancel(TsCore *c);
 void ts_reply(TsCore *c);          /* 0.5.1: the reply key: answer the passenger's question (talk.c) */
 /* new ride requests around the car (the pause-menu page asks for them as it opens) */
 void ts_refresh_offers(TsCore *c);
+void ts_go_online(TsCore *c); /* 0.13: GO: the shift starts, requests come one by one */
+void ts_decline(TsCore *c);   /* 0.13: say no to the request on the phone */
+#define TS_REQUEST_S 20.0     /* 0.13: how long a request waits for a yes */
 /* the GPS target again (the player removed it, or the phone was opened) */
 void ts_renew_nav(TsCore *c);
 
@@ -442,6 +495,24 @@ void ts_hud(const TsCore *c, TsHud *out);
 /* 0.6 (market.c): names */
 const char *ts_class_name(int ride_class, int german);
 const char *ts_tier_name(int tier, int german);
+/* 0.10.1: the shop (shop.c): an item's name, what it does, its price */
+const char *ts_shop_name(const TsCore *c, int item);
+const char *ts_shop_what(const TsCore *c, int item);
+void ts_shop_buy(TsCore *c, int item);
+long long ts_shop_cost(const TsCore *c, int item);    /* 0.13: what it costs in CR (base x cr_scale) */
+long long ts_shop_balance(const TsCore *c);           /* the game's credits (-1 unknown) */
+void ts_shop_credit_done(TsCore *c, int item, int ok, long long balance);
+float ts_shop_pay_factor(const TsCore *c, int bus, float trip_m, int on_time); /* 0.13: the surcharges bought */
+float ts_shop_start_sat(const TsCore *c);
+/* 0.10.1: the first of n entries to show when at most `visible` fit and `sel` must be seen (the phone scrolls) */
+int ts_scroll_first(int n, int sel, int visible);
+/* 0.13: the ride book as a line of text and back (the glue's file); a target from the app's map */
+int ts_book_format(const TsBookEntry *e, char *out, size_t size);
+int ts_book_parse(const char *line, TsBookEntry *e);
+void ts_book_add(TsCore *c, const TsBookEntry *e); /* in front (newest first) */
+void ts_set_target(TsCore *c, float x, float z);   /* the GPS goes there while no job runs */
+void ts_clear_target(TsCore *c);
+void ts_tier_need(int tier, int *jobs, float *stars, float *rep);
 int ts_tier_for(const TsCore *c); /* the tier the numbers reach now (TsCore.tier keeps the highest) */
 
 /* takes the queued events (returns how many, up to max) */
@@ -458,6 +529,8 @@ int ts_has(const TsCore *c, int item);
 
 /* speeds as the game shows them: km/h, or mph rounded to 5 (75 mph for 120 km/h) */
 int ts_speed_shown(const TsCore *c, int kmh);
+void ts_money_text(const TsCore *c, long long v, char *out, size_t size); /* 0.12 */
+const char *ts_cr(int german, long long v); /* 0.13: "12.345 CR" in one of 8 rotating buffers (for one printf) */
 const char *ts_speed_unit(const TsCore *c);
 /* a place's or a bus line's name in the player's language ("Nice · Spot 4" / "Nizza · Treffpunkt 4") */
 const char *ts_place_name(const TsCore *c, int place);

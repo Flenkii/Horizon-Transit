@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include "jobs.h"
 
-enum { TS_THEME_NIGHT = 0, TS_THEME_LIGHT, TS_THEME_FESTIVAL, TS_THEME_OCEAN, TS_THEME_CARBON, TS_THEME_RIVIERA, TS_THEME_GOLD, TS_THEME_PURE, TS_THEMES };
+enum { TS_THEME_NIGHT = 0, TS_THEME_LIGHT, TS_THEME_FESTIVAL, TS_THEME_OCEAN, TS_THEME_CARBON, TS_THEME_RIVIERA, TS_THEME_GOLD, TS_THEME_PURE, TS_THEME_PURE_DARK, TS_THEMES };
 
 enum { TS_TEXT_LEFT = 0, TS_TEXT_CENTER, TS_TEXT_RIGHT };
 
@@ -45,6 +45,7 @@ void ts_phone_draw(const TsHud *h, int theme, float scale, const char *clock, Ts
 void ts_phone_finish(int theme, float scale, TsPhoneCanvas *cv);
 
 const char *ts_theme_name(int theme, int german);
+void ts_theme_colors(int theme, uint32_t out[11], int *card_alpha); /* 0.10.1: for the phone app */
 
 /* 0.9.1: where ts_device_draw put the map (pixels x0, y0, x1, y1; all 0 = no map) */
 extern int ts_map_rect_px[4];

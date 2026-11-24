@@ -21,6 +21,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #include <xmmintrin.h>
@@ -34,13 +35,15 @@
 #include "core/map.h"
 #include "core/gamemap.h"
 #include "phone_window.h"
+#include "core/companion.h"
+#include "companion_net.h"
 #include "voice.h"
 #include "phone_draw.h"
 #include <mmsystem.h>
 #include "sounds.h" /* the sounds, built in by build.py from sounds/ */
 
 #define MOD_NAME "Horizon Transit"
-#define MOD_VERSION "0.9.1"
+#define MOD_VERSION "0.13.0"
 #define MOD_FOLDER L"TransportSim"
 
 /* ------------------------------------------------------------------ game addresses (checked below) */
@@ -72,6 +75,42 @@ static const unsigned char NAVIGATE_BYTES[] = {0x80, 0xB9, 0x60, 0x01, 0x00, 0x0
                                                0x89, 0x50, 0x01, 0x00, 0x00, 0xE9, 0xCB, 0xCE, 0x39, 0x00};
 static const unsigned char CLEAR_BYTES[] = {0x80, 0xB9, 0x60, 0x01, 0x00, 0x00, 0x00, 0x74, 0x0C, 0x48, 0x8B,
                                             0x89, 0x50, 0x01, 0x00, 0x00, 0xE9, 0xAB, 0x99, 0x39, 0x00};
+
+/* 0.13: the game's own "award credits" (rcx unused, edx = amount) -> 1 if paid. It takes the active profile
+   (global game+0x34B3E18 -> vtable slot 0x50), adds the amount to "Main/Credits" (AddCredits game+0x2CC550 ->
+   SetCredits game+0x2F5EF0, capped at 999,999,999, no telemetry with a NULL reason) and to
+   "Main/NumCreditsEarned", then has the profile saved (game+0x2F3820). The game's gift and reward handlers call it
+   (game+0x9F4950, +0x9F5030, +0xA42780). Its first 64 bytes, calls included, pin it to this exe. */
+#define RVA_AWARD_CREDITS 0x9E9120u
+static const unsigned char AWARD_CREDITS_BYTES[] = {
+    0x40, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF, 0x48,
+    0x89, 0x5C, 0x24, 0x40, 0x8B, 0xFA, 0xE8, 0x35, 0xE1, 0x93, 0xFF, 0x4C, 0x8B, 0x00, 0x48, 0x8B,
+    0xC8, 0x41, 0xFF, 0x50, 0x50, 0x48, 0x8B, 0xD8, 0x48, 0x85, 0xC0, 0x74, 0x0A, 0x4C, 0x8B, 0x00,
+    0x48, 0x8B, 0xC8, 0x41, 0xFF, 0x50, 0x10, 0x48, 0x89, 0x5C, 0x24, 0x50, 0x48, 0x85, 0xDB, 0x74};
+typedef unsigned char (*AwardCreditsFn)(void *unused, int amount);
+/* 0.13: the game's own "spend credits" (rcx unused, edx = amount): the profile (global game+0x34ABA60 ->
+   game+0x21E070 -> game+0x2DDE80), GetCredits game+0x2DC820, SetCredits(profile, credits - amount, reason 13).
+   It doesn't check the balance (the mod does, with the same calls) and doesn't save (the mod then calls the award
+   with 0, which only saves). Both byte runs pin the calls to this exe. */
+#define RVA_SPEND_CREDITS 0x564800u
+#define RVA_PROFILE_GLOBAL 0x34ABA60u
+#define RVA_PROFILE_HOLDER 0x21E070u
+#define RVA_PROFILE_GET 0x2DDE80u
+#define RVA_GET_CREDITS 0x2DC820u
+static const unsigned char SPEND_CREDITS_BYTES[] = {
+    0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x40, 0x48, 0x8B, 0x0D, 0x4F, 0x72, 0xF4,
+    0x02, 0x8B, 0xFA, 0xE8, 0x58, 0x98, 0xCB, 0xFF, 0x48, 0x8B, 0x08, 0xE8, 0x60, 0x96, 0xD7, 0xFF,
+    0x48, 0x8B, 0xD8, 0x48, 0x85, 0xC0, 0x74, 0x3F, 0x48, 0x8B, 0xC8, 0xC6, 0x44, 0x24, 0x20, 0x00,
+    0x48, 0xC7, 0x44, 0x24, 0x28, 0xFF, 0xFF, 0xFF, 0xFF, 0xC7, 0x44, 0x24, 0x24, 0xFF, 0xFF, 0xFF};
+static const unsigned char SPEND_CREDITS_BYTES_2[] = {
+    0xFF, 0xC7, 0x44, 0x24, 0x30, 0x00, 0x00, 0x00, 0x00, 0xC7, 0x44, 0x24, 0x34, 0x0D, 0x00, 0x00,
+    0x00, 0xE8, 0xCA, 0x7F, 0xD7, 0xFF, 0x4C, 0x8D, 0x44, 0x24, 0x20, 0x48, 0x8B, 0xCB, 0x2B, 0xC7,
+    0x8B, 0xD0, 0xE8, 0x89, 0x16, 0xD9, 0xFF, 0x48};
+static const unsigned char GET_CREDITS_BYTES[] = {0x40, 0x53, 0x48, 0x81, 0xEC, 0xA0, 0x00, 0x00, 0x00, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF};
+typedef void (*SpendCreditsFn)(void *unused, int amount);
+typedef void **(*ProfileHolderFn)(void *global);
+typedef void *(*ProfileGetFn)(void *holder);
+typedef unsigned (*GetCreditsFn)(void *profile);
 
 typedef struct {
     __m128 position, velocity, spin, right, up, forward;
@@ -115,11 +154,25 @@ static int opt_complaints = 1;    /* 0.4.1: passengers remark on the driving */
 static int opt_extras = 1;        /* 0.4: reputation effects, special rides, wishes */
 static int opt_doors = 1;         /* 0.4.3: the mod-menu switch "Passenger doors", on by default */
 static int opt_door_anim = 1;     /* [Doors] Animate: 0 = only the sounds */
+static int opt_cr_scale = 5;      /* 0.13: [Credits] Scale: the pay in CR per old euro */
+static volatile LONG64 credits_owed;   /* worker adds, game thread pays */
+static volatile LONG64 credits_paid;   /* total paid by this mod (the INI) */
+static volatile LONG64 credits_toast;  /* paid since the last pop-up (the worker shows it) */
+static volatile LONG credits_dirty;    /* the worker writes [Credits] */
+static volatile LONG credits_backup;   /* 0 none yet, 1 asked, 2 done (or the platform's snapshot) */
+static volatile LONG64 credits_balance = -1; /* 0.13: the game account as last read (game thread) */
+static volatile LONG credits_buy_item = -1;  /* 0.13: a shop purchase for the game thread to pay */
+static volatile LONG64 credits_buy_cost;
+static volatile LONG credits_buy_done = -1;  /* item | ok << 8, for the worker */
 static int opt_door_shut_ms = 600; /* [Doors] ShutDelayMs: close -> the close sound */
 static int opt_door_volume = 80;  /* [Doors] Volume 0..100 (our sound files) */
 static int opt_sounds = 2;        /* 0.5.1: the mod's own sounds: 0 off (the game's UI sounds instead), 1 quiet, 2 normal, 3 loud */
 static int opt_speed_warn = 1;    /* 0.5.1: the speed warning's tones */
 static int opt_replies = 1;       /* 0.5.1: answer passengers' questions with a key; 0.8 also with the controller */
+static int opt_app = 0;           /* 0.10: the phone app (a little server in the home network); off until switched on */
+static int app_code;              /* 0.10: [PhoneApp] Code, the pairing code the app asks for (made on the first start) */
+static volatile LONG want_app_apply = 1; /* 0.10: the worker starts or stops the server */
+static char app_ip[64];           /* 0.10.1: the PC's address in the home network, while the server runs */
 static uint32_t reply_pad = FH2_PAD_LB | FH2_PAD_RB | FH2_PAD_DPAD_DOWN; /* 0.8: [Keys] ReplyPad, the controller chord */
 static volatile LONGLONG pad_reply_ms;      /* 0.8: when the controller chord was last used (GetTickCount64) */
 static int opt_reply_vk = 'B';    /* [Keys] ReplyKey: free on Marvin's PC (checked against all his mods' keys, 2026-11-20) */
@@ -211,10 +264,19 @@ static void load_settings(void) {
     opt_voices = ini_int("Settings", "Voices", 0);
     if (opt_voices < 0 || opt_voices > 3) opt_voices = 0;
     opt_doors = ini_int("Settings", "PassengerDoors", 1) != 0;
+    opt_cr_scale = ini_int("Credits", "Scale", 5);
+    if (opt_cr_scale < 1 || opt_cr_scale > 100) opt_cr_scale = 5;
     opt_sounds = ini_int("Settings", "Sounds", 2);
     if (opt_sounds < 0 || opt_sounds > 3) opt_sounds = 2;
     opt_speed_warn = ini_int("Settings", "SpeedWarning", 1) != 0;
     opt_replies = ini_int("Settings", "Replies", 1) != 0;
+    opt_app = ini_int("Settings", "PhoneApp", 0) != 0;
+    app_code = ini_int("PhoneApp", "Code", 0);
+    if (app_code < 1000 || app_code > 9999) { /* a new pairing code, 1000..9999 */
+        LARGE_INTEGER q;
+        QueryPerformanceCounter(&q);
+        app_code = 1000 + (int)(((uint32_t)q.QuadPart * 2654435761u ^ GetCurrentProcessId() * 40503u) % 9000u);
+    }
     opt_reply_vk = ini_int("Keys", "ReplyKey", 'B');
     reply_pad = (uint32_t)ini_int("Keys", "ReplyPad", (int)reply_pad);
     if (opt_reply_vk <= 0 || opt_reply_vk > 254) opt_reply_vk = 'B';
@@ -258,9 +320,12 @@ static void save_settings(void) {
     ini_put_int("Settings", "Complaints", opt_complaints);
     ini_put_int("Settings", "Voices", opt_voices);
     ini_put_int("Settings", "PassengerDoors", opt_doors);
+    ini_put_int("Credits", "Scale", opt_cr_scale);
     ini_put_int("Settings", "Sounds", opt_sounds);
     ini_put_int("Settings", "SpeedWarning", opt_speed_warn);
     ini_put_int("Settings", "Replies", opt_replies);
+    ini_put_int("Settings", "PhoneApp", opt_app);
+    ini_put_int("PhoneApp", "Code", app_code);
     ini_put_int("Keys", "ReplyKey", opt_reply_vk);
     ini_put_int("Keys", "ReplyPad", (int)reply_pad);
     ini_put_int("Doors", "Animate", opt_door_anim);
@@ -293,9 +358,47 @@ static void save_settings(void) {
     }
 }
 
+/* 0.13: the ride book, one job per line, newest first (TransportSim-rides.txt) */
+static wchar_t book_path[MAX_PATH];
+static unsigned book_saved;
+static TsBookEntry book_copy[TS_BOOK];
+static int book_copy_n, book_dirty;
+
+/* under the lock */
+static void load_book(void) {
+    core.book_count = 0;
+    FILE *f = book_path[0] ? _wfopen(book_path, L"r") : NULL;
+    if (f) {
+        char line[256];
+        while (core.book_count < TS_BOOK && fgets(line, sizeof(line), f))
+            if (ts_book_parse(line, &core.book[core.book_count])) core.book_count++;
+        fclose(f);
+    }
+    core.book_serial = (unsigned)time(NULL); /* new each game: the app fetches the book once */
+    book_saved = core.book_serial;
+    log_line("ride book: %d jobs", core.book_count);
+}
+
+/* not under the lock: writes what book_copy holds */
+static void save_book(void) {
+    if (!book_path[0]) return;
+    wchar_t tmp[MAX_PATH];
+    if (_snwprintf(tmp, MAX_PATH, L"%ls.new", book_path) <= 0) return;
+    FILE *f = _wfopen(tmp, L"w");
+    if (!f) return;
+    char line[256];
+    for (int i = 0; i < book_copy_n; ++i)
+        if (ts_book_format(&book_copy[i], line, sizeof(line))) fprintf(f, "%s\n", line);
+    int ok = fclose(f) == 0;
+    if (ok) MoveFileExW(tmp, book_path, MOVEFILE_REPLACE_EXISTING);
+}
+
 /* under the lock */
 static void load_stats(void) {
-    core.wallet = ini_ll("Stats", "Wallet", 0);
+    core.wallet = ini_ll("Credits", "Earned", 0); /* 0.13: only a count of what was earned (CR); the old € funds are gone */
+    credits_owed = ini_ll("Credits", "Owed", 0);
+    if (credits_owed < 0) credits_owed = 0;
+    credits_paid = ini_ll("Credits", "Paid", 0);
     core.jobs_done = ini_int("Stats", "Rides", 0);
     core.bus_lines_done = ini_int("Stats", "BusLines", 0);
     core.passengers_total = ini_int("Stats", "Passengers", 0);
@@ -347,7 +450,7 @@ static void load_stats(void) {
 }
 
 static void save_stats(const TsCore *c) {
-    ini_put_int("Stats", "Wallet", c->wallet);
+    ini_put_int("Credits", "Earned", c->wallet);
     ini_put_int("Stats", "Rides", c->jobs_done);
     ini_put_int("Stats", "BusLines", c->bus_lines_done);
     ini_put_int("Stats", "Passengers", c->passengers_total);
@@ -462,6 +565,180 @@ static int car_media_name(unsigned char *car, char *out, size_t size) {
 }
 
 static void *named_car;
+/* ------------------------------------------------------------------ the game: credits (0.13)
+
+   All money is the game's credits (Marvin: "no fake money"). Every CR the core earns (c->wallet goes up: rides, bus
+   lines, bonuses, the lost property reward) is owed to the player; the game's thread pays it through the game's own
+   award (RVA_AWARD_CREDITS) every second or two, so the game keeps the profile, its "total earned" and its save
+   consistent. The shop takes the game's credits through the game's own spend (RVA_SPEND_CREDITS) after checking the
+   balance. What's owed but not paid yet stays in the INI ([Credits] Owed) for the next start. The saves are backed
+   up by the platform at every start (or by the mod into <Azimuth>\\TransportSim\\save-backups\\ if that fails). */
+
+#define CREDITS_MAX_AT_ONCE 50000000
+static int credits_code = -1;          /* game thread: -1 unchecked, 0 not this game's code, 1 ok */
+static ULONGLONG credits_next_ms;
+static long long credits_wallet_seen;
+static int credits_wallet_known;
+
+/* worker, under the lock: the core earned CR (c->wallet went up) -> credits owed */
+static void credits_count(const TsCore *c) {
+    if (!credits_wallet_known) {
+        credits_wallet_seen = c->wallet;
+        credits_wallet_known = 1;
+        return;
+    }
+    long long d = c->wallet - credits_wallet_seen;
+    credits_wallet_seen = c->wallet;
+    if (d <= 0) return;
+    InterlockedAdd64(&credits_owed, d); /* 0.13: the pay is in CR already */
+    InterlockedExchange(&credits_dirty, 1);
+    if (credits_backup == 0) InterlockedExchange(&credits_backup, 1);
+}
+
+static int copy_folder(const wchar_t *from, const wchar_t *to) {
+    CreateDirectoryW(to, NULL);
+    wchar_t pattern[MAX_PATH];
+    if (_snwprintf(pattern, MAX_PATH, L"%ls\\*", from) <= 0) return 0;
+    WIN32_FIND_DATAW f;
+    HANDLE h = FindFirstFileW(pattern, &f);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    int ok = 1;
+    do {
+        if (!wcscmp(f.cFileName, L".") || !wcscmp(f.cFileName, L"..")) continue;
+        wchar_t a[MAX_PATH], b[MAX_PATH];
+        if (_snwprintf(a, MAX_PATH, L"%ls\\%ls", from, f.cFileName) <= 0 || _snwprintf(b, MAX_PATH, L"%ls\\%ls", to, f.cFileName) <= 0) {
+            ok = 0;
+            continue;
+        }
+        if (f.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ok &= copy_folder(a, b);
+        else ok &= CopyFileW(a, b, FALSE) != 0;
+    } while (FindNextFileW(h, &f));
+    FindClose(h);
+    return ok;
+}
+
+/* worker: the mod's own copy of the saves, when the switch went on during a session */
+static void credits_backup_step(void) {
+    if (credits_backup != 1) return;
+    wchar_t from[MAX_PATH], to[MAX_PATH];
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    int ok = api->azimuth_dir && _snwprintf(from, MAX_PATH, L"%ls\\data\\titles\\1A96545B\\saves", api->azimuth_dir) > 0 &&
+             _snwprintf(to, MAX_PATH, L"%ls\\%ls\\save-backups", api->azimuth_dir, MOD_FOLDER) > 0;
+    if (ok) {
+        CreateDirectoryW(to, NULL);
+        size_t n = wcslen(to);
+        _snwprintf(to + n, MAX_PATH - n, L"\\%04u%02u%02u-%02u%02u%02u", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+        ok = GetFileAttributesW(from) != INVALID_FILE_ATTRIBUTES && copy_folder(from, to);
+    }
+    log_line(ok ? "credits: the saves are backed up to TransportSim\\save-backups before the first payout"
+                : "credits: the saves could NOT be backed up (no saves folder?) - paying anyway, the game's own save path is used");
+    InterlockedExchange(&credits_backup, 2);
+}
+
+/* game thread: the game account's balance, -1 if there's no profile */
+static long long credits_read(void) {
+    void *global = *(void **)(game + RVA_PROFILE_GLOBAL);
+    if (!global) return -1;
+    void **holder = ((ProfileHolderFn)(game + RVA_PROFILE_HOLDER))(global);
+    if (!holder || !*holder) return -1;
+    void *profile = ((ProfileGetFn)(game + RVA_PROFILE_GET))(*holder);
+    if (!profile) return -1;
+    return (long long)((GetCreditsFn)(game + RVA_GET_CREDITS))(profile);
+}
+
+/* game thread (the own car's update): read the balance, pay a purchase, pay what's owed */
+static void credits_step(void) {
+    ULONGLONG now = GetTickCount64();
+    if (now < credits_next_ms) return;
+    credits_next_ms = now + 1000;
+    if (credits_code < 0) {
+        credits_code = code_is(RVA_AWARD_CREDITS, AWARD_CREDITS_BYTES, sizeof(AWARD_CREDITS_BYTES)) &&
+                       code_is(RVA_SPEND_CREDITS, SPEND_CREDITS_BYTES, sizeof(SPEND_CREDITS_BYTES)) &&
+                       code_is(RVA_SPEND_CREDITS + 0x40, SPEND_CREDITS_BYTES_2, sizeof(SPEND_CREDITS_BYTES_2)) &&
+                       code_is(RVA_GET_CREDITS, GET_CREDITS_BYTES, sizeof(GET_CREDITS_BYTES));
+        log_line(credits_code ? "credits: the game's award and spend (game+0x%X, +0x%X) are as expected - rides pay credits, the shop takes them"
+                              : "credits: the game's award or spend (game+0x%X, +0x%X) is NOT the code this mod knows - no credits, no shop",
+                 RVA_AWARD_CREDITS, RVA_SPEND_CREDITS);
+    }
+    if (!credits_code) return;
+    AwardCreditsFn award = (AwardCreditsFn)(game + RVA_AWARD_CREDITS);
+    long long balance = credits_read();
+    LONG item = credits_buy_item;
+    if (item >= 0 && credits_backup == 2) { /* a shop purchase */
+        long long cost = credits_buy_cost;
+        int ok = balance >= 0 && cost > 0 && cost <= 999999999 && balance >= cost;
+        if (ok) {
+            ((SpendCreditsFn)(game + RVA_SPEND_CREDITS))(NULL, (int)cost);
+            award(NULL, 0); /* only saves the profile */
+            long long after = credits_read();
+            ok = after >= 0 && after == balance - cost;
+            log_line("credits: shop item %ld bought for %lld CR (%lld -> %lld)%s", item, cost, balance, after, ok ? "" : " - the balance isn't as expected");
+            ok = after < balance; /* paid is paid */
+            balance = after;
+        } else log_line("credits: shop item %ld costs %lld CR, the game account has %lld - not bought", item, cost, balance);
+        InterlockedExchange64(&credits_balance, balance);
+        InterlockedExchange(&credits_buy_item, -1);
+        InterlockedExchange(&credits_buy_done, item | (ok ? 1 << 8 : 0));
+        return;
+    }
+    if (credits_owed > 0 && credits_backup == 2) {
+        long long owed = credits_owed;
+        int amount = owed > CREDITS_MAX_AT_ONCE ? CREDITS_MAX_AT_ONCE : (int)owed;
+        if (award(NULL, amount)) {
+            InterlockedAdd64(&credits_owed, -amount);
+            InterlockedAdd64(&credits_paid, amount);
+            InterlockedAdd64(&credits_toast, amount);
+            InterlockedExchange(&credits_dirty, 1);
+            log_line("credits: %d CR paid to the game's profile", amount);
+            balance = credits_read();
+            credits_next_ms = now + 2000;
+        } else {
+            static int said;
+            if (!said++) log_line("credits: the game has no active profile yet - trying again");
+            credits_next_ms = now + 10000;
+        }
+    }
+    InterlockedExchange64(&credits_balance, balance);
+}
+
+/* "12.500" / "12,500" */
+static void credits_text(long long v, int german, char *out, size_t size) {
+    char digits[32], *o = out;
+    snprintf(digits, sizeof(digits), "%lld", v < 0 ? -v : v);
+    size_t n = strlen(digits);
+    if (v < 0 && size > 1) *o++ = '-';
+    for (size_t i = 0; i < n && (size_t)(o - out) + 2 < size; ++i) {
+        if (i && (n - i) % 3 == 0) *o++ = german ? '.' : ',';
+        *o++ = digits[i];
+    }
+    *o = 0;
+}
+
+/* worker: the pop-up, the INI */
+static void credits_worker_step(int german) {
+    if (credits_owed > 0 && credits_backup == 0) InterlockedExchange(&credits_backup, 1); /* owed from the last start */
+    credits_backup_step();
+    LONG64 shown = InterlockedExchange64(&credits_toast, 0);
+    if (shown > 0 && api->api_version >= 10) {
+        char num[32], sub[96];
+        credits_text(shown, german, num, sizeof(num));
+        snprintf(sub, sizeof(sub), german ? "+%s CR auf dein Spielkonto" : "+%s CR to your game account", num);
+        FH2Toast t;
+        memset(&t, 0, sizeof(t));
+        t.size = sizeof(t);
+        t.title = german ? "Credits gutgeschrieben" : "Credits paid";
+        t.subtitle = sub;
+        t.icon = FH2_ICON_PAYOUT;
+        t.expire_s = 20;
+        api->show_toast(mod, &t);
+    }
+    if (InterlockedExchange(&credits_dirty, 0)) {
+        ini_put_int("Credits", "Owed", credits_owed);
+        ini_put_int("Credits", "Paid", credits_paid);
+    }
+}
+
 static unsigned name_checks;
 static int door_probe(unsigned char *car, int *mask_out);
 static int car_side(unsigned char *car, const char *media, const TsCar *s);
@@ -505,6 +782,7 @@ static void car_update(void *car, float dt, float frame_dt, unsigned frame) {
     if (door_mask >= 0) core.door_mask = door_mask;
     ReleaseSRWLockExclusive(&lock);
     door_game_step(c);
+    credits_step();
     if (read_name && strcmp(media, car_media)) {
         snprintf(car_media, sizeof(car_media), "%s", media);
         const TsCarInfo *info = ts_car_find(media);
@@ -1219,6 +1497,7 @@ static void deliver(const TsEvent *e, int german) {
         api->show_toast(mod, &t);
     } else if (e->kind == TS_EV_FEED) {
         log_line("chat: %s: %s", e->title, e->text);
+        ts_app_feed(e->title, e->text, e->style); /* 0.10: the phone app's chat */
         if (!(hud_ok() & FH2_HUD_AVAILABLE)) phone_window_feed(e->title, e->text, e->style); /* the HUD layer is off: our own lines */
         if (opt_voices > 0 && e->speaker >= 0) voice_say(e->text, german, e->voice_female, e->voice_pitch, e->voice_rate);
         else if (opt_voices > 0 && e->speaker == TS_SPEAKER_ANNOUNCE) voice_say(e->text, german, 1, -1, -1); /* 0.5: the bus's announcement */
@@ -1436,11 +1715,16 @@ static void key_name(int vk, char *out, size_t size) {
 
 /* ------------------------------------------------------------------ the worker */
 
+/* 0.9.2 (Marvin: "like Gripline: German game, German mod; English or any other language, English"): German only when the
+   game's language is German. Until the game has picked its language (its first seconds) the last one it had, English at
+   first, never the Windows language. Only platforms before API 10, which can't tell the game's language, guess Windows'. */
 static int language_german(void) {
+    static int game_de = 0;
     if (opt_language) return opt_language == 1;
+    if (api->api_version < 10) return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_GERMAN;
     char code[8] = {0};
-    if (api->api_version >= 10 && api->game_language(code, sizeof(code))) return strcmp(code, "DE") == 0;
-    return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_GERMAN;
+    if (api->game_language(code, sizeof(code))) game_de = strcmp(code, "DE") == 0;
+    return game_de;
 }
 
 /* ------------------------------------------------------------------ the phone's Settings tab: the same settings as the mod menu */
@@ -1453,6 +1737,7 @@ typedef struct {
 } PhoneSetting;
 
 static PhoneSetting phone_settings[TS_SETTING_ROWS] = {
+    {"PhoneApp", "Handy-App verbinden", "Connect phone app", &opt_app, 2}, /* 0.10.1: first, so it's quick to find */
     {"Device", "Gerät", "Device", &opt_device, TS_DEVICES},
     {"PhoneStyle", "Design", "Design", &opt_phone_style, TS_THEMES},
     {"Language", "Sprache", "Language", &opt_language, 3},
@@ -1461,22 +1746,38 @@ static PhoneSetting phone_settings[TS_SETTING_ROWS] = {
     {"AutoNavigation", "Navigation automatisch", "Auto GPS", &opt_nav, 2},
     {"CareerExtras", "Ruf, Sonderfahrten, Wünsche", "Reputation, specials, wishes", &opt_extras, 2},
     {"Voices", "Stimmen (Versuch)", "Voices (experimental)", &opt_voices, 4},
+    /* 0.10.1: the rest of the mod menu's settings */
+    {"Sounds", "Mod-Geräusche", "Mod sounds", &opt_sounds, 4},
+    {"SpeedWarning", "Tempo-Warnton", "Speed warning tones", &opt_speed_warn, 2},
+    {"Replies", "Fahrgästen antworten", "Answer passengers", &opt_replies, 2},
+    {"PassengerDoors", "Fahrgast-Türen", "Passenger doors", &opt_doors, 2},
+    {"RidePanel", "Fahrt-Panel am Tacho", "Ride panel", &opt_dash, 2},
+    {"MapPreview", "Kartenvorschau", "Map preview", &opt_map_preview, 2},
+    {"BusLinesNeedBus", "Buslinien nur im Bus", "Bus lines need the bus", &opt_bus_needs_bus, 2},
 };
 
-static const char *phone_setting_value(int i, int de) {
+/* 0.10.4: the name of value v of row i (the phone app lists all of them) */
+static const char *phone_setting_name(int i, int v, int de) {
     static const char *const langs[3] = {"Spiel", "Deutsch", "English"}, *const langs_en[3] = {"Game", "Deutsch", "English"};
     static const char *const limits[3] = {"Locker", "Normal", "Streng"}, *const limits_en[3] = {"Relaxed", "Normal", "Strict"};
     static const char *const voices[4] = {"Aus", "Leise", "Normal", "Laut"}, *const voices_en[4] = {"Off", "Quiet", "Normal", "Loud"};
-    int v = *phone_settings[i].value;
     if (v < 0 || v >= phone_settings[i].count) v = 0;
     const char *key = phone_settings[i].key;
     if (!strcmp(key, "Device")) return ts_device_name(v, de);
     if (!strcmp(key, "PhoneStyle")) return ts_theme_name(v, de);
     if (!strcmp(key, "Language")) return de ? langs[v] : langs_en[v];
     if (!strcmp(key, "TimeLimit")) return de ? limits[v] : limits_en[v];
-    if (!strcmp(key, "Voices")) return de ? voices[v] : voices_en[v];
+    if (!strcmp(key, "Voices") || !strcmp(key, "Sounds")) return de ? voices[v] : voices_en[v];
+    if (!strcmp(key, "PhoneApp")) { /* 0.10.1: on: the pairing code right in the row */
+        static char code[24];
+        if (!v) return de ? "Aus" : "Off";
+        if (!app_net_running()) return de ? "Startet ..." : "Starting ...";
+        snprintf(code, sizeof(code), "Code %d", app_code);
+        return code;
+    }
     return v ? (de ? "An" : "On") : (de ? "Aus" : "Off");
 }
+static const char *phone_setting_value(int i, int de) { return phone_setting_name(i, *phone_settings[i].value, de); }
 
 /* under the lock */
 static void fill_phone_settings(TsCore *c) {
@@ -1484,14 +1785,32 @@ static void fill_phone_settings(TsCore *c) {
     for (int i = 0; i < TS_SETTING_ROWS; ++i) {
         snprintf(c->setting_label[i], sizeof(c->setting_label[i]), "%s", c->german ? phone_settings[i].de : phone_settings[i].en);
         snprintf(c->setting_value[i], sizeof(c->setting_value[i]), "%s", phone_setting_value(i, c->german));
+        c->setting_note[i][0] = 0;
+        int v = *phone_settings[i].value, n = phone_settings[i].count;
+        c->setting_index[i] = v >= 0 && v < n ? v : 0;
+        c->setting_choices[i] = n <= 12 && strcmp(phone_settings[i].key, "PhoneApp") ? n : 0; /* the app can't switch itself off */
+        for (int k = 0; k < c->setting_choices[i]; ++k)
+            snprintf(c->setting_choice[i][k], sizeof(c->setting_choice[i][k]), "%s", phone_setting_name(i, k, c->german));
+        if (!strcmp(phone_settings[i].key, "PhoneApp")) { /* 0.10.1: what to do on the phone */
+            const char *ip = app_ip;
+            if (opt_app && app_net_running()) {
+                snprintf(c->setting_note[i], sizeof(c->setting_note[i]), c->german ? "App öffnen, Code %d eingeben · PC %s:%d"
+                                                                                  : "Open the app, type code %d · PC %s:%d",
+                         app_code, ip[0] ? ip : "?", app_net_port());
+            } else
+                snprintf(c->setting_note[i], sizeof(c->setting_note[i]), "%s",
+                         c->german ? "Enter schaltet die Handy-App ein. Dann steht hier der Code." : "Enter switches the phone app on. Then the code shows here.");
+        }
     }
 }
 
-/* not under the lock (on_setting may take it): the next value, shown in the mod menu too */
-static void phone_setting_press(int i) {
+/* not under the lock (on_setting may take it): value v (-1 = the next one), shown in the mod menu too */
+static void phone_setting_set(int i, int v) {
     if (i < 0 || i >= TS_SETTING_ROWS) return;
     const PhoneSetting *s = &phone_settings[i];
-    int next = (*s->value + 1) % s->count;
+    if (v >= s->count || (v >= 0 && !strcmp(s->key, "PhoneApp"))) return;
+    if (v == *s->value) return;
+    int next = v >= 0 ? v : (*s->value + 1) % s->count;
     on_setting(NULL, s->key, next);
     if (api->api_version >= 4) api->set_setting(mod, s->key, next);
     log_line("phone: setting %s = %d", s->key, next);
@@ -1520,6 +1839,53 @@ static int game_imperial(void) {
     return units == 0 || units == 1;
 }
 
+static const char *TR(const char *key, const char *english);
+/* 0.10: the phone app's server on or off as the switch says; the row's description shows where and the code */
+static void app_apply(void) {
+    int de = language_german();
+    char code[8], desc[600], ip[64] = "";
+    snprintf(code, sizeof(code), "%d", app_code);
+    if (opt_app && !app_net_running()) {
+        char name[64] = "PC";
+        DWORD n = sizeof(name);
+        GetComputerNameA(name, &n);
+        app_net_set_name(name);
+        if (app_net_start(APP_NET_PORT, code, MOD_VERSION, log_line)) {
+            app_net_address(ip, sizeof(ip));
+            snprintf(app_ip, sizeof(app_ip), "%s", ip);
+            log_line("phone app: listening on %s:%d (code %s)", ip[0] ? ip : "?", app_net_port(), code);
+            char title[96], text[128];
+            snprintf(title, sizeof(title), "%s", de ? "Handy-App bereit" : "Phone app ready");
+            snprintf(text, sizeof(text), "%s:%d · %s %s", ip[0] ? ip : "?", app_net_port(), de ? "Code" : "code", code);
+            if (api->api_version >= 10) {
+                FH2Toast t;
+                memset(&t, 0, sizeof(t));
+                t.size = sizeof(t);
+                t.key = "phoneapp";
+                t.title = title;
+                t.subtitle = text;
+                t.icon = FH2_ICON_ROADS;
+                t.expire_s = 20;
+                api->show_toast(mod, &t);
+            }
+        } else log_line("phone app: the server didn't start");
+    } else if (!opt_app && app_net_running()) {
+        app_net_stop();
+        log_line("phone app: stopped");
+    }
+    if (api->api_version < 10 || api->size < offsetof(FH2ModApi, set_setting_text) + sizeof(api->set_setting_text) || !api->set_setting_text) return;
+    const char *base = TR("row.PhoneApp.description",
+                          "Horizon Transit on your real phone: rides, the map, bus lines and the chat, live. Install the Android app "
+                          "(HorizonTransit.apk), phone and PC in the same Wi-Fi. When switched on, the address and the pairing code "
+                          "show here. Windows asks once whether the game may use the network: allow it for private networks.");
+    if (app_net_running()) {
+        if (!ip[0]) app_net_address(ip, sizeof(ip));
+        snprintf(desc, sizeof(desc), de ? "%s\n\nJetzt an: %s:%d · Code %s" : "%s\n\nOn now: %s:%d · code %s", base, ip[0] ? ip : "?",
+                 app_net_port(), code);
+    } else snprintf(desc, sizeof(desc), "%s", base);
+    api->set_setting_text(mod, "PhoneApp", TR("row.PhoneApp.label", "Phone app (Wi-Fi)"), desc, NULL, 0);
+}
+
 static DWORD WINAPI worker(LPVOID unused) {
     (void)unused;
     game = (unsigned char *)api->wait_for_code(0xFFFFFFFFu);
@@ -1541,6 +1907,7 @@ static DWORD WINAPI worker(LPVOID unused) {
                 log_line("speed unit from the game: %s", now ? "mph" : "km/h");
             }
         }
+        if (InterlockedExchange(&want_app_apply, 0)) app_apply();
         TsEvent events[TS_MAX_EVENTS];
         int n = 0, save = 0, job = 0, de = 0;
         TsHud h;
@@ -1556,6 +1923,7 @@ static DWORD WINAPI worker(LPVOID unused) {
         /* 0.8: questions for everyone (before: only after driving with the keyboard, so controller players never got
            one); the chip names the controller chord unless the keyboard was used for driving lately */
         core.replies_on = opt_replies;
+        core.app_theme = opt_phone_style; /* 0.10.1: the phone app takes the design over */
         {
             ULONGLONG now_ms = GetTickCount64();
             int keyboard = now_ms - (ULONGLONG)keyboard_drive_ms < 120000 && now_ms - (ULONGLONG)pad_reply_ms > 120000;
@@ -1575,22 +1943,71 @@ static DWORD WINAPI worker(LPVOID unused) {
         if (InterlockedExchange(&want_accept, 0)) ts_phone_accept(&core);
         int pressed = core.setting_pressed;
         core.setting_pressed = -1;
+        int want[TS_SETTING_ROWS]; /* 0.10.4: what the phone app set (offline changes come all at once) */
         LONG row = InterlockedExchange(&want_row, -1);
         if (row >= 0) ts_accept_row(&core, (int)row);
         if (InterlockedExchange(&want_cancel, 0)) ts_cancel(&core);
+        {   /* 0.10: what the phone app asked for */
+            int a, arg;
+            while (app_net_take(&a, &arg)) log_line("phone app: %d %d -> %d", a, arg, ts_app_do(&core, a, arg));
+        }
+        core.wall_time = (long long)time(NULL); /* 0.13: the ride book's dates */
         ts_step(&core);
+        credits_count(&core);
+        {   /* 0.13: the shop with the game's credits */
+            SYSTEMTIME lt;
+            GetLocalTime(&lt);
+            core.local_hour = lt.wHour;
+            core.credits_mode = credits_code != 0; /* -1 (not checked yet) counts as working */
+            core.cr_scale = opt_cr_scale;
+            core.game_credits = credits_balance;
+            LONG done = InterlockedExchange(&credits_buy_done, -1);
+            if (done >= 0) ts_shop_credit_done(&core, done & 0xFF, (done >> 8) & 1, credits_balance);
+            if (!core.credits_mode && core.credit_buy_item >= 0) core.credit_buy_item = -1; /* the game's code isn't as expected */
+            static int handed = -1;
+            if (core.credit_buy_item < 0) handed = -1;
+            else if (handed != core.credit_buy_item && credits_buy_item < 0) {
+                handed = core.credit_buy_item;
+                credits_buy_cost = core.credit_buy_cost;
+                InterlockedExchange(&credits_buy_item, handed);
+                if (credits_backup == 0) InterlockedExchange(&credits_backup, 1);
+            }
+        }
+        for (int i = 0; i < TS_SETTING_ROWS; ++i) want[i] = core.setting_want[i], core.setting_want[i] = -1;
+        if (core.book_serial != book_saved) { /* 0.13: a new job in the ride book: written after the lock */
+            book_saved = core.book_serial;
+            book_copy_n = core.book_count;
+            memcpy(book_copy, core.book, sizeof(TsBookEntry) * (size_t)book_copy_n);
+            book_dirty = 1;
+        }
         fill_phone_settings(&core);
         n = ts_take_events(&core, events, TS_MAX_EVENTS);
         for (int i = 0; i < n; ++i) save |= events[i].kind == TS_EV_SAVE;
         ts_hud(&core, &h);
+        if (app_net_running()) { /* 0.10: the phone app's state; the bus lines now and then */
+            static char app_json[256 * 1024];
+            static int lines_tick;
+            size_t len = ts_app_state_json(&core, &h, app_json, sizeof(app_json));
+            if (len) app_net_publish(app_json, len, core.german);
+            if (lines_tick-- <= 0) {
+                lines_tick = 50;
+                len = ts_app_lines_json(&core, app_json, sizeof(app_json));
+                if (len) app_net_lines(app_json, len);
+                len = ts_app_history_json(&core, app_json, sizeof(app_json)); /* 0.13 */
+                if (len) app_net_history(app_json, len);
+            }
+        }
         job = core.mode != TS_IDLE;
         de = core.german;
         InterlockedExchange(&phone_is_open, core.phone_open);
         if (save) stats = core;
         ReleaseSRWLockExclusive(&lock);
-        if (pressed >= 0) phone_setting_press(pressed);
+        if (pressed >= 0) phone_setting_set(pressed, -1);
+        for (int i = 0; i < TS_SETTING_ROWS; ++i)
+            if (want[i] >= 0) phone_setting_set(i, want[i]);
         side_hook();
         if (InterlockedExchange(&want_save_sides, 0)) save_settings();
+        credits_worker_step(de);
 
         if (!logged_car && car_samples > 0) {
             logged_car = 1;
@@ -1598,6 +2015,7 @@ static DWORD WINAPI worker(LPVOID unused) {
         }
         for (int i = 0; i < n; ++i) deliver(&events[i], de);
         if (save) save_stats(&stats);
+        if (book_dirty) book_dirty = 0, save_book();
         /* the phone: its own window over the game (the HUD list only when the window can't be made) */
         TsHud hud_h = h;
         {   /* 0.5.1: the speed warning's tones, while the sign is on screen (not over the pause menu or the map) */
@@ -1723,6 +2141,10 @@ static void on_setting(void *user, const char *key, int value) {
     else if (!strcmp(key, "PassengerDoors")) opt_doors = value != 0;
     else if (!strcmp(key, "SpeedWarning")) opt_speed_warn = value != 0;
     else if (!strcmp(key, "Replies")) opt_replies = value != 0;
+    else if (!strcmp(key, "PhoneApp")) {
+        opt_app = value != 0;
+        InterlockedExchange(&want_app_apply, 1);
+    }
     else if (!strcmp(key, "Sounds")) {
         int was = opt_sounds;
         opt_sounds = value < 0 || value > 3 ? 2 : value;
@@ -1790,7 +2212,7 @@ static void page_open(void *user, const char *page_key) {
             char dist[24];
             if (c.imperial) snprintf(dist, sizeof(dist), "%.1f mi", o->trip_m / 1609.344f);
             else snprintf(dist, sizeof(dist), "%.1f km", o->trip_m / 1000.0f);
-            snprintf(v, sizeof(v), "%s · %d €", dist, o->pay);
+            snprintf(v, sizeof(v), "%s · %d CR", dist, o->pay);
             static const char *const types_de[TS_P_KINDS] = {"Normal", "Gemütlich", "Eilig", "Autofan", "VIP", "Geschäftskunde", "Hochzeitspaar", "Ausflug"};
             static const char *const types_en[TS_P_KINDS] = {"Normal", "Relaxed", "In a hurry", "Car fan", "VIP", "Business", "Wedding", "Day trip"};
             snprintf(descs[i], sizeof(descs[i]), "%s (%s) %s %s %s. %s %d:%02d, %s %d %s.", ts_passenger_name(o->passenger),
@@ -1814,8 +2236,9 @@ static void page_open(void *user, const char *page_key) {
         }
     }
     ROW(NULL, de ? "Konto" : "Account", "", NULL, FH2_ROW_HEADING);
-    snprintf(v, sizeof(v), "%lld €", c.wallet);
-    ROW(NULL, de ? "Firmenkasse" : "Company funds", v, de ? "Das Geld deiner Firma Horizon Transit. Es ist getrennt von den Credits deines Spielstands." : "Your company's money, kept apart from your save's credits.", FH2_ROW_NORMAL);
+    if (c.game_credits >= 0) ts_money_text(&c, c.game_credits, v, sizeof(v));
+    else snprintf(v, sizeof(v), "… CR");
+    ROW(NULL, de ? "Spielkonto" : "Game account", v, de ? "Deine echten Credits. Jeder Lohn geht direkt hierhin, der Shop bezahlt damit." : "Your real credits. Every pay goes straight here, the shop pays with them.", FH2_ROW_NORMAL);
     snprintf(v, sizeof(v), "%d / %d", c.jobs_done, c.bus_lines_done);
     ROW(NULL, de ? "Fahrten / Buslinien" : "Rides / bus lines", v, NULL, FH2_ROW_NORMAL);
     snprintf(v, sizeof(v), "%.1f / 5", c.rating_count ? (double)c.rating_sum / c.rating_count : 0.0);
@@ -1904,6 +2327,7 @@ static void add_rows(void) {
     s.value = opt_doors;
     s.on_change = on_setting;
     api->add_setting(mod, &s);
+
 
     memset(&s, 0, sizeof(s));
     s.size = sizeof(s);
@@ -1996,7 +2420,8 @@ static void add_rows(void) {
 
         const char *styles[TS_THEMES] = {TR("row.PhoneStyle.choice.0", "Night"), TR("row.PhoneStyle.choice.1", "Light"),
                                          TR("row.PhoneStyle.choice.2", "Festival"), TR("row.PhoneStyle.choice.3", "Ocean"),
-                                         "Carbon", "Riviera", "Gold", TR("row.PhoneStyle.choice.7", "Pure")};
+                                         "Carbon", "Riviera", "Gold", TR("row.PhoneStyle.choice.7", "Pure"),
+                                         TR("row.PhoneStyle.choice.8", "Pure Dark")};
         memset(&s, 0, sizeof(s));
         s.size = sizeof(s);
         s.key = "PhoneStyle";
@@ -2027,12 +2452,25 @@ static void add_rows(void) {
 
     memset(&s, 0, sizeof(s));
     s.size = sizeof(s);
+    s.key = "PhoneApp";
+    s.label = TR("row.PhoneApp.label", "Phone app (Wi-Fi)");
+    s.description = TR("row.PhoneApp.description",
+                       "Horizon Transit on your real phone: rides, the map, bus lines and the chat, live. Install the Android app "
+                       "(HorizonTransit.apk), phone and PC in the same Wi-Fi. When switched on, the address and the pairing code "
+                       "show here. Windows asks once whether the game may use the network: allow it for private networks.");
+    s.value = opt_app;
+    s.on_change = on_setting;
+    api->add_setting(mod, &s);
+
+    memset(&s, 0, sizeof(s));
+    s.size = sizeof(s);
     s.key = "BusInAutoshow";
     s.label = TR("row.BusInAutoshow.label", "Bus in the Autoshow");
     s.description = TR("row.BusInAutoshow.description",
                        "EXPERIMENTAL: makes the game's traffic bus (PG_BUS_14) buyable in the Autoshow, in the Ford Transit's group. "
                        "Also works from the FH2MP launcher; the database file isn't changed. Don't buy or drive it online. "
-                       "A save backup is made.");
+                       "In Upgrades > Conversion it gets 4 engine swaps (6.2L V8, 7.0L Hemi V8, 6.0L V12, 5.2L V10). "
+                       "A swapped engine stays valid with this off or the mod removed. A save backup is made.");
     s.value = opt_bus_autoshow;
     s.needs_restart = 1;
     s.on_change = on_setting;
@@ -2146,6 +2584,14 @@ static void bus_autoshow_hook(void) {
     log_line("EXPERIMENTAL bus in the Autoshow: NOT hooked (see above)");
 }
 
+/* 0.13: the platform's copy of the saves before the game reads them, when the credits switch is on at the start */
+static void credits_snapshot(void) {
+    if (api->api_version >= 9 && api->request_save_snapshot(mod, "Horizon Transit: rides pay game credits", 3)) {
+        InterlockedExchange(&credits_backup, 2);
+        log_line("credits: the pay goes to the game account (scale %d), the platform backs up the saves at this start", opt_cr_scale);
+    } else log_line("credits: the pay goes to the game account (scale %d); the mod backs up the saves before the first payout", opt_cr_scale);
+}
+
 static void bus_autoshow(void) {
     if (!opt_bus_autoshow) return;
     if (api->api_version >= 9) api->request_save_snapshot(mod, "FH2 Transport: bus in the Autoshow (experimental)", 3);
@@ -2164,7 +2610,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     info.platform_version = "2.9.0";
     info.check_updates = 0;
     info.description = "Horizon Transit - Your festival. Your route. Rides and bus lines with virtual passengers: "
-                       "phone on F9, GPS route, time limit, speed, passenger comfort and the company's funds.";
+                       "phone on F9, GPS route, time limit, speed, passenger comfort and real game credits.";
     info.offline_only = 1;
     mod = api->register_mod(&info);
     if (!mod) return 0; /* online: the platform doesn't run this mod */
@@ -2179,6 +2625,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
         folder_ok = 1;
         CreateDirectoryW(folder, NULL);
         _snwprintf(ini_path, MAX_PATH, L"%ls\\TransportSim.ini", folder);
+        _snwprintf(book_path, MAX_PATH, L"%ls\\TransportSim-rides.txt", folder); /* 0.13: the ride book */
         _snwprintf(sound_folder, MAX_PATH, L"%ls\\sounds", folder);
     }
     if (api->api_version >= 9) {
@@ -2195,6 +2642,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     save_settings(); /* the INI shows every setting */
     ts_init(&core, (uint32_t)GetTickCount() ^ (uint32_t)GetCurrentProcessId() * 2654435761u, language_german());
     load_stats();
+    load_book();
     core.time_factor = time_factor();
 
     if (api->api_version >= 10) api->ui_uses(mod, FH2_UI_USES_TOASTS);
@@ -2203,6 +2651,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     add_page();
     add_hud();
     bus_autoshow();
+    credits_snapshot();
 
     install_key_hook(); /* a Windows DLL: no need to wait for the game */
     HANDLE keys = CreateThread(NULL, 0, keys_thread, NULL, 0, NULL);

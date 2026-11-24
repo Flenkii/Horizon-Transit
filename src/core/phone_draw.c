@@ -52,7 +52,20 @@ static const Theme themes[TS_THEMES] = {
     /* 0.5.1 Pur / Pure: like a ride-hailing app: white, black type, grey cards without outlines, black pills */
     {0x111111, 0x3A3A3A, 0x000000, 0xFFFFFF, 0xFFFFFF, 0xF3F3F3, 0xF3F3F3, 255, 0x000000, 0x6B6B6B, 0xFFFFFF,
      0x000000, 0x1A1A1A, 0xEEEEEE, 255, 0xC77700, 0x000000},
+    /* 0.13 Pur Dunkel / Pure Dark: the ride app's dark mode (Marvin's screenshots): near black, grey cards, white
+       type, white pills with black type, green only for good news */
+    {0x111111, 0x3A3A3A, 0x000000, 0x1C1C1C, 0x121212, 0x2A2A2A, 0x3A3A3A, 255, 0xFFFFFF, 0xA8A8A8, 0x000000,
+     0xFFFFFF, 0xE2E2E2, 0x2A2A2A, 255, 0xF5B700, 0xFFFFFF},
 };
+
+/* 0.10.1: a design's colours for the phone app: top, bottom, card, card line, text, dim, selected text, accent, accent 2,
+   warn, value (0xRRGGBB); card alpha 0..255 */
+void ts_theme_colors(int theme, uint32_t out[11], int *card_alpha) {
+    const Theme *t = &themes[theme >= 0 && theme < TS_THEMES ? theme : 0];
+    uint32_t v[11] = {t->top, t->bottom, t->card, t->card_line, t->text, t->dim, t->sel_text, t->accent, t->accent2, t->warn, t->value};
+    for (int i = 0; i < 11; ++i) out[i] = v[i];
+    if (card_alpha) *card_alpha = t->card_alpha;
+}
 
 const char *ts_theme_name(int theme, int german) {
     switch (theme) {
@@ -63,6 +76,7 @@ const char *ts_theme_name(int theme, int german) {
     case TS_THEME_RIVIERA: return "Riviera";
     case TS_THEME_GOLD: return "Gold";
     case TS_THEME_PURE: return german ? "Pur" : "Pure";
+    case TS_THEME_PURE_DARK: return german ? "Pur Dunkel" : "Pure Dark";
     default: return german ? "Nacht" : "Night";
     }
 }
@@ -126,6 +140,102 @@ static void box(Ctx *c, float ux, float uy, float uw, float uh, float ur, uint32
 
 static void fill(Ctx *c, float x, float y, float w, float h, float r, uint32_t col) { box(c, x, y, w, h, r, col, col, 1, 255); }
 
+/* ------------------------------------------------------------------ 0.11: glass (like Liquid Glass / Material You) */
+static int clip_px(Ctx *c, float x, float y, float w, float h, int *x0, int *y0, int *x1, int *y1) {
+    *x0 = (int)floorf(x), *y0 = (int)floorf(y), *x1 = (int)ceilf(x + w), *y1 = (int)ceilf(y + h);
+    if (*x0 < 0) *x0 = 0;
+    if (*y0 < 0) *y0 = 0;
+    if (*x1 > c->cv->w) *x1 = c->cv->w;
+    if (*y1 > c->cv->h) *y1 = c->cv->h;
+    if (c->clip) {
+        if (*x0 < c->clip_x0) *x0 = c->clip_x0;
+        if (*y0 < c->clip_y0) *y0 = c->clip_y0;
+        if (*x1 > c->clip_x1) *x1 = c->clip_x1;
+        if (*y1 > c->clip_y1) *y1 = c->clip_y1;
+    }
+    return *x0 < *x1 && *y0 < *y1;
+}
+
+/* a rounded box whose colour fades out downwards: alpha a0 at the top to a1 at `fade` of its height (a gloss) */
+static void box_fade(Ctx *c, float ux, float uy, float uw, float uh, float ur, uint32_t col, int a0, int a1, float fade) {
+    if (c->dry) return;
+    float s = c->s, x = ux * s, y = uy * s, w = uw * s, h = uh * s, r = ur * s;
+    if (r > w * 0.5f) r = w * 0.5f;
+    if (r > h * 0.5f) r = h * 0.5f;
+    int x0, y0, x1, y1;
+    if (!clip_px(c, x, y, w, h, &x0, &y0, &x1, &y1)) return;
+    for (int py = y0; py < y1; ++py) {
+        float t = clampf((py + 0.5f - y) / (h * (fade > 0.01f ? fade : 1.0f)), 0, 1);
+        float a = (a0 + (a1 - a0) * t) / 255.0f;
+        if (a <= 0.0f) continue;
+        for (int px = x0; px < x1; ++px) {
+            float cov = rbox_cover(px + 0.5f, py + 0.5f, x, y, w, h, r);
+            if (cov <= 0.0f) continue;
+            uint32_t *d = &c->cv->px[py * c->cv->w + px];
+            *d = mix(*d & 0xFFFFFF, col, cov * a);
+        }
+    }
+}
+
+/* a thin line round a rounded box (inside its edge) */
+static void outline(Ctx *c, float ux, float uy, float uw, float uh, float ur, float uwidth, uint32_t col, int alpha) {
+    if (c->dry) return;
+    float s = c->s, x = ux * s, y = uy * s, w = uw * s, h = uh * s, r = ur * s, lw = uwidth * s;
+    if (lw < 1.0f) lw = 1.0f;
+    if (r > w * 0.5f) r = w * 0.5f;
+    if (r > h * 0.5f) r = h * 0.5f;
+    float ri = r - lw > 0 ? r - lw : 0;
+    int x0, y0, x1, y1;
+    if (!clip_px(c, x, y, w, h, &x0, &y0, &x1, &y1)) return;
+    for (int py = y0; py < y1; ++py)
+        for (int px = x0; px < x1; ++px) {
+            float fx = px + 0.5f, fy = py + 0.5f;
+            float cov = rbox_cover(fx, fy, x, y, w, h, r) - rbox_cover(fx, fy, x + lw, y + lw, w - 2 * lw, h - 2 * lw, ri);
+            if (cov <= 0.0f) continue;
+            uint32_t *d = &c->cv->px[py * c->cv->w + px];
+            *d = mix(*d & 0xFFFFFF, col, cov * alpha / 255.0f);
+        }
+}
+
+static int theme_light(const Theme *t) { return (0.299f * (t->bottom >> 16 & 255) + 0.587f * (t->bottom >> 8 & 255) + 0.114f * (t->bottom & 255)) > 150.0f; }
+
+/* a frosted card: the card colour (see-through, the wallpaper shows), a light rim, a gloss at the top */
+static void glass(Ctx *c, float x, float y, float w, float h, float r) {
+    const Theme *t = c->t;
+    int light = theme_light(t);
+    int a = t->card_alpha >= 255 ? (light ? 200 : 175) : t->card_alpha;
+    box(c, x, y, w, h, r, t->card, t->card, 1, a);
+    box_fade(c, x, y, w, h, r, 0xFFFFFF, light ? 70 : 22, 0, 0.55f);
+    outline(c, x, y, w, h, r, 1.0f, light ? 0xFFFFFF : mix(t->card_line, 0xFFFFFF, 0.25f), light ? 230 : 150);
+}
+
+/* the gradient pill of the chosen thing, with a gloss on its upper half */
+static void glossy(Ctx *c, float x, float y, float w, float h, float r) {
+    const Theme *t = c->t;
+    box(c, x, y, w, h, r, t->accent, t->accent2, 0, 255);
+    box_fade(c, x, y, w, h, r, 0xFFFFFF, 70, 0, 0.6f);
+    outline(c, x, y, w, h, r, 1.0f, 0xFFFFFF, 70);
+}
+
+/* the wallpaper: soft glows of the design's colours over the screen (inside the rounded screen box) */
+static void glow(Ctx *c, float sx, float sy, float sw, float sh, float sr, float ucx, float ucy, float ur, uint32_t col, int alpha) {
+    if (c->dry) return;
+    float s = c->s, cx = ucx * s, cy = ucy * s, r = ur * s;
+    float X = sx * s, Y = sy * s, W = sw * s, H = sh * s, R = sr * s;
+    int x0, y0, x1, y1;
+    if (!clip_px(c, cx - r, cy - r, 2 * r, 2 * r, &x0, &y0, &x1, &y1)) return;
+    for (int py = y0; py < y1; ++py)
+        for (int px = x0; px < x1; ++px) {
+            float dx = (px + 0.5f - cx) / r, dy = (py + 0.5f - cy) / r, d2 = dx * dx + dy * dy;
+            if (d2 >= 1.0f) continue;
+            float k = 1.0f - d2;
+            float cov = rbox_cover(px + 0.5f, py + 0.5f, X, Y, W, H, R);
+            if (cov <= 0.0f) continue;
+            uint32_t *d = &c->cv->px[py * c->cv->w + px];
+            *d = mix(*d & 0xFFFFFF, col, cov * k * k * alpha / 255.0f);
+        }
+}
+
 static void text(Ctx *c, const char *s, float x, float y, float w, float h, float size, int weight, uint32_t color, int align) {
     if (!s || !s[0] || !c->cv->text || c->dry) return;
     TsPhoneText t;
@@ -158,6 +268,10 @@ static float measure(Ctx *c, const char *s, float size, int weight) {
 
 static void text_wrap(Ctx *c, const char *s, float x, float y, float w, float h, float size, uint32_t color) {
     if (!s || !s[0] || !c->cv->text || c->dry) return;
+    if (measure(c, s, size, 400) <= w - 2) { /* 0.13: one line: in the middle of the box, not at its top */
+        text(c, s, x, y, w, h, size, 400, color, TS_TEXT_CENTER);
+        return;
+    }
     TsPhoneText t;
     memset(&t, 0, sizeof(t));
     t.utf8 = s;
@@ -188,6 +302,7 @@ static void status_bar(Ctx *c, float sx0, float sx1, float sy, const char *clock
 static void logo(Ctx *c, float x, float y, float d) {
     const Theme *t = c->t;
     box(c, x, y, d, d, d * 0.3f, t->accent, t->accent2, 0, 255);
+    box_fade(c, x, y, d, d, d * 0.3f, 0xFFFFFF, 80, 0, 0.6f); /* 0.11 */
     uint32_t w = 0xFFFFFF;
     fill(c, x + d * 0.26f, y + d * 0.22f, d * 0.13f, d * 0.56f, d * 0.06f, w);
     fill(c, x + d * 0.61f, y + d * 0.22f, d * 0.13f, d * 0.56f, d * 0.06f, w);
@@ -227,140 +342,7 @@ void ts_device_size(int device, float scale, int *w, int *h) {
 
 void ts_phone_size(float scale, int *w, int *h) { ts_device_size(TS_DEVICE_PHONE, scale, w, h); }
 
-/* the app's head: logo, name, slogan; returns the height used */
-static float app_head(Ctx *c, const TsHud *h, float x0, float y, float cw) {
-    const Theme *t = c->t;
-    logo(c, x0, y, 40);
-    text(c, "Horizon Transit", x0 + 52, y - 1, cw - 52, 24, 20, 700, t->text, TS_TEXT_LEFT);
-    text(c, pick(h->german, "Dein Festival. Deine Route.", "Your festival. Your route."), x0 + 52, y + 21, cw - 52, 18, 12.5f, 400,
-         t->dim, TS_TEXT_LEFT);
-    return 54;
-}
-
 int ts_tab_rect_px[4];
-
-/* the tabs: a switch with the open one filled; returns the height used */
-static float app_tabs(Ctx *c, const TsHud *h, float x0, float y, float cw) {
-    const Theme *t = c->t;
-    int tabs = h->tab_count > 0 ? h->tab_count : 1;
-    ts_tab_rect_px[0] = (int)floorf(x0 * c->s), ts_tab_rect_px[1] = (int)floorf(y * c->s);
-    ts_tab_rect_px[2] = (int)ceilf((x0 + cw) * c->s), ts_tab_rect_px[3] = (int)ceilf((y + 32) * c->s);
-    box(c, x0, y, cw, 32, 16, t->seg, t->seg, 1, t->seg_alpha);
-    /* each tab as wide as its name, the rest shared out; smaller letters for many tabs */
-    float tsize = tabs > 5 ? 11.0f : tabs > 4 ? 12.0f : 13.5f, tws[8], sum = 0.0f, pad = tabs > 5 ? 7.0f : 10.0f;
-    for (int i = 0; i < tabs && i < 8; ++i) sum += tws[i] = measure(c, h->tabs[i], tsize, 700) + pad;
-    float extra = (cw - 4 - sum) / tabs, txs[9], tx = x0 + 2;
-    int n = tabs < 8 ? tabs : 8;
-    for (int i = 0; i < n; ++i) txs[i] = tx, tx += extra >= 0.0f ? tws[i] + extra : (cw - 4) / tabs;
-    txs[n] = tx;
-    /* the pill: at the open tab, or (0.9.1) on its way there */
-    float pos = h->tab_slide > 0.0f ? clampf(h->tab_slide - 1.0f, 0.0f, (float)(n - 1)) : (float)h->tab;
-    if (pos >= 0.0f && pos <= (float)(n - 1)) {
-        int i0 = (int)pos;
-        float f = pos - (float)i0;
-        if (i0 >= n - 1) i0 = n - 1, f = 0.0f;
-        float px = txs[i0] + (txs[i0 + 1] - txs[i0]) * f, pw = txs[i0 + 1] - txs[i0];
-        if (f > 0.0f) pw += ((txs[i0 + 2] - txs[i0 + 1]) - pw) * f;
-        box(c, px, y + 2, pw, 28, 14, t->accent, t->accent2, 0, 255);
-    }
-    int lit = (int)(pos + 0.5f);
-    for (int i = 0; i < n; ++i) {
-        int on = i == lit;
-        text(c, h->tabs[i], txs[i], y + 2, txs[i + 1] - txs[i], 28, tsize, on ? 700 : 600, on ? t->sel_text : t->dim, TS_TEXT_CENTER);
-    }
-    return 44;
-}
-
-/* the entries: the rows after the app's heading; a grey row right under an entry is its second line. Returns the y after them. */
-static float app_entries(Ctx *c, const TsHud *h, float x0, float y, float cw) {
-    const Theme *t = c->t;
-    float x1 = x0 + cw;
-    Entry e[8];
-    int n = 0;
-    int first = h->row_count > 0 && h->row_heading[0] == 1 ? 1 : 0;
-    for (int i = first; i < h->row_count && n < 8; ++i) {
-        Entry *en = &e[n];
-        memset(en, 0, sizeof(*en));
-        en->label_row = i, en->sub_row = -1;
-        if (h->row_heading[i] == 2) {
-            if (i == first) en->caption = 1;
-            else en->disabled = 1;
-        } else if (h->row_heading[i] == 1) {
-            en->caption = 1;
-        } else if (i + 1 < h->row_count && h->row_heading[i + 1] == 2 && i + 1 != h->row_selected) {
-            en->sub_row = i + 1;
-            ++i;
-        }
-        ++n;
-    }
-    for (int k = 0; k < n; ++k) {
-        const Entry *en = &e[k];
-        int r = en->label_row;
-        if (en->caption) {
-            float cv = h->row_value[r][0] ? measure(c, h->row_value[r], 12.5f, 600) + 4 : 0;
-            if (cv > (cw - 8) * 0.5f) cv = (cw - 8) * 0.5f;
-            text(c, h->row_label[r], x0 + 4, y, cw - 8 - cv - (cv > 0 ? 8 : 0), 22, 12.5f, 600, t->dim, TS_TEXT_LEFT);
-            if (cv > 0) text(c, h->row_value[r], x1 - 4 - cv, y, cv, 22, 12.5f, 600, t->dim, TS_TEXT_RIGHT);
-            y += 26;
-            continue;
-        }
-        int sel = r == h->row_selected || (en->sub_row >= 0 && en->sub_row == h->row_selected);
-        float ch = en->sub_row >= 0 ? 56 : 42;
-        if (sel) {
-            box(c, x0, y, cw, ch, 13, t->accent, t->accent2, 0, 255);
-        } else {
-            box(c, x0, y, cw, ch, 13, t->card_line, t->card_line, 1, t->card_alpha);
-            box(c, x0 + 1, y + 1, cw - 2, ch - 2, 12, t->card, t->card, 1, t->card_alpha);
-        }
-        uint32_t main = sel ? t->sel_text : en->disabled ? t->dim : t->text;
-        uint32_t second = sel ? t->sel_text : t->dim;
-        uint32_t value = sel ? t->sel_text : en->disabled ? t->dim : t->value;
-        float inner = cw - 26;
-        if (en->sub_row >= 0) {
-            /* two lines: the entry over the whole width; under it its grey line, the value on the right */
-            int s2 = en->sub_row;
-            char sub[112];
-            if (h->row_value[s2][0]) snprintf(sub, sizeof(sub), "%s · %s", h->row_label[s2], h->row_value[s2]);
-            else snprintf(sub, sizeof(sub), "%s", h->row_label[s2]);
-            /* a value "2,8 km · 960 CR": the money up on the right of line 1, the distance on line 2 */
-            char v1[48], v2[48];
-            snprintf(v1, sizeof(v1), "%s", h->row_value[r]);
-            v2[0] = 0;
-            char *dot = strstr(v1, " · ");
-            if (dot) {
-                snprintf(v2, sizeof(v2), "%.*s", (int)(dot - v1), v1);
-                memmove(v1, dot + strlen(" · "), strlen(dot + strlen(" · ")) + 1);
-            }
-            float w1 = measure(c, v1, 14, 700) + 4;
-            if (w1 <= 4) w1 = 0;
-            if (w1 > inner * 0.5f) w1 = inner * 0.5f;
-            text(c, h->row_label[r], x0 + 13, y + 6, inner - w1 - (w1 > 0 ? 8 : 0), 24, 14.5f, 600, main, TS_TEXT_LEFT);
-            if (w1 > 0) text(c, v1, x1 - 13 - w1, y + 6, w1, 24, 14, 700, value, TS_TEXT_RIGHT);
-            float w2 = measure(c, v2, 12.5f, 600) + 4;
-            if (w2 <= 4) w2 = 0;
-            if (w2 > inner * 0.4f) w2 = inner * 0.4f;
-            if (w2 > 0) text(c, v2, x1 - 13 - w2, y + 29, w2, 20, 12.5f, 600, sel ? t->sel_text : t->text, TS_TEXT_RIGHT);
-            text(c, sub, x0 + 13, y + 29, inner - w2 - (w2 > 0 ? 8 : 0), 20, 12, 400, second, TS_TEXT_LEFT);
-        } else {
-            /* one line: the label gets what the value leaves */
-            float vw = measure(c, h->row_value[r], 13.5f, 700) + 4;
-            float lw = measure(c, h->row_label[r], 14.5f, 600) + 4;
-            if (vw <= 4) vw = 0;
-            /* both don't fit: the value keeps its width (up to 45 %), the label is shortened */
-            if (lw + vw + 10 > inner && vw > inner * 0.45f) vw = inner * 0.45f;
-            text(c, h->row_label[r], x0 + 13, y + 9, inner - vw - (vw > 0 ? 10 : 0), 24, 14.5f, 600, main, TS_TEXT_LEFT);
-            if (vw > 0) text(c, h->row_value[r], x1 - 13 - vw, y + 9, vw, 24, 13.5f, 700, value, TS_TEXT_RIGHT);
-        }
-        if (r < 9 && (h->row_meter_on >> r & 1u)) { /* 0.5.1: a thin meter along the card's bottom */
-            float m = h->row_meter[r], mw = cw - 26, my = y + ch - 7;
-            uint32_t col = sel ? t->sel_text : !(h->row_meter_quality >> r & 1u) ? t->accent : m >= 0.7f ? 0x2FD27A : m >= 0.4f ? 0xFFC83D : 0xFF4D4D;
-            fill(c, x0 + 13, my, mw, 3, 1.5f, sel ? mix(t->sel_text, t->accent, 0.6f) : t->card_line);
-            if (m > 0.0f) fill(c, x0 + 13, my, mw * m < 3 ? 3 : mw * m, 3, 1.5f, col);
-        }
-        y += ch + 6;
-    }
-    return y;
-}
 
 static const char *keys_text(const TsHud *h) {
     switch (h->map_keys) { /* 0.7 */
@@ -392,6 +374,13 @@ static void device_body(Ctx *c, int device, float *sx0, float *sy0, float *sx1, 
     float sr = b->r - b->bezel;
     if (sr < 8) sr = 8;
     box(c, *sx0, *sy0, *sx1 - *sx0, *sy1 - *sy0, sr, t->top, t->bottom, 1, 255);
+    { /* 0.11: the wallpaper's glows */
+        float W = *sx1 - *sx0, H = *sy1 - *sy0;
+        int light = theme_light(t);
+        glow(c, *sx0, *sy0, W, H, sr, *sx0 + W * 0.15f, *sy0 + H * 0.12f, W * 0.75f, t->accent, light ? 55 : 95);
+        glow(c, *sx0, *sy0, W, H, sr, *sx0 + W * 0.95f, *sy0 + H * 0.45f, W * 0.7f, t->accent2, light ? 45 : 70);
+        glow(c, *sx0, *sy0, W, H, sr, *sx0 + W * 0.25f, *sy0 + H * 0.92f, W * 0.8f, mix(t->accent, t->top, 0.5f), light ? 40 : 75);
+    }
     /* the keys on the frame's edges */
     if (device == TS_DEVICE_PHONE) {
         fill(c, X + 0.8f, Y + 130, 3, 30, 1.5f, t->rim);
@@ -845,8 +834,7 @@ static void map_box(Ctx *c, const TsHud *h, float bx, float by, float bw, float 
 
 static void detail_column(Ctx *c, const TsHud *h, float x0, float y, float w, float bottom) {
     const Theme *t = c->t;
-    box(c, x0, y, w, bottom - y, 16, t->card_line, t->card_line, 1, t->card_alpha);
-    box(c, x0 + 1, y + 1, w - 2, bottom - y - 2, 15, t->card, t->card, 1, t->card_alpha);
+    glass(c, x0, y, w, bottom - y, 20);
     float x = x0 + 16, cw = w - 32;
     y += 12;
     text(c, h->detail_title, x, y, cw, 26, 16.5f, 700, t->text, TS_TEXT_LEFT);
@@ -906,6 +894,349 @@ static void detail_column(Ctx *c, const TsHud *h, float x0, float y, float w, fl
     }
 }
 
+/* ------------------------------------------------------------------ 0.12: the app's new look, as in the Android app:
+   the head with the car and the company funds, a big page title, roomy glass cards (the chosen one with a rim in the
+   app's colour; a ride request opens a "take the ride" pill), switches for On/Off, tiles for short numbers, a GO card
+   for the shift, a sheet for the running job, and a floating tab bar with icons at the bottom */
+
+enum { IC_CAR = 0, IC_BUS, IC_MAP, IC_PERSON, IC_BAG, IC_GEAR };
+
+static void icon(Ctx *c, int kind, float cx, float cy, float s, uint32_t col) {
+    float u = s / 20.0f; /* drawn on a 20 x 20 grid round (cx, cy) */
+#define P(x, y) cx + ((x) - 10) * u, cy + ((y) - 10) * u
+    switch (kind) {
+    case IC_CAR:
+        seg(c, P(5, 9), P(7, 4.5f), 1.8f * u, col, 255);
+        seg(c, P(7, 4.5f), P(13, 4.5f), 1.8f * u, col, 255);
+        seg(c, P(13, 4.5f), P(15, 9), 1.8f * u, col, 255);
+        fill(c, cx - 8 * u, cy - 1.5f * u, 16 * u, 7 * u, 2.5f * u, col);
+        fill(c, cx - 7 * u, cy + 4.5f * u, 3.4f * u, 4 * u, 1.2f * u, col);
+        fill(c, cx + 3.6f * u, cy + 4.5f * u, 3.4f * u, 4 * u, 1.2f * u, col);
+        break;
+    case IC_BUS:
+        outline(c, cx - 6.5f * u, cy - 8 * u, 13 * u, 14.5f * u, 3 * u, 1.8f * u, col, 255);
+        fill(c, cx - 6.5f * u, cy - 2 * u, 13 * u, 1.8f * u, 0, col);
+        fill(c, cx - 5 * u, cy + 6 * u, 3 * u, 3 * u, 1 * u, col);
+        fill(c, cx + 2 * u, cy + 6 * u, 3 * u, 3 * u, 1 * u, col);
+        break;
+    case IC_MAP:
+        seg(c, P(3, 5), P(8, 3), 1.8f * u, col, 255);
+        seg(c, P(8, 3), P(12, 5), 1.8f * u, col, 255);
+        seg(c, P(12, 5), P(17, 3), 1.8f * u, col, 255);
+        seg(c, P(17, 3), P(17, 15), 1.8f * u, col, 255);
+        seg(c, P(17, 15), P(12, 17), 1.8f * u, col, 255);
+        seg(c, P(12, 17), P(8, 15), 1.8f * u, col, 255);
+        seg(c, P(8, 15), P(3, 17), 1.8f * u, col, 255);
+        seg(c, P(3, 17), P(3, 5), 1.8f * u, col, 255);
+        seg(c, P(8, 3), P(8, 15), 1.6f * u, col, 255);
+        seg(c, P(12, 5), P(12, 17), 1.6f * u, col, 255);
+        break;
+    case IC_PERSON:
+        outline(c, cx - 3.6f * u, cy - 8 * u, 7.2f * u, 7.2f * u, 3.6f * u, 1.8f * u, col, 255);
+        outline(c, cx - 7 * u, cy + 1.5f * u, 14 * u, 12 * u, 6 * u, 1.8f * u, col, 255);
+        break;
+    case IC_BAG:
+        outline(c, cx - 7 * u, cy - 3 * u, 14 * u, 11 * u, 2.5f * u, 1.8f * u, col, 255);
+        seg(c, P(7, 7), P(7, 5), 1.8f * u, col, 255);
+        seg(c, P(7, 5), P(8.5f, 2.6f), 1.8f * u, col, 255);
+        seg(c, P(8.5f, 2.6f), P(11.5f, 2.6f), 1.8f * u, col, 255);
+        seg(c, P(11.5f, 2.6f), P(13, 5), 1.8f * u, col, 255);
+        seg(c, P(13, 5), P(13, 7), 1.8f * u, col, 255);
+        break;
+    default: /* the gear: a ring, eight teeth */
+        for (int i = 0; i < 8; ++i) {
+            float a = i * 0.785398f, dx = sinf(a), dy = cosf(a);
+            seg(c, cx + dx * 5.5f * u, cy + dy * 5.5f * u, cx + dx * 8.2f * u, cy + dy * 8.2f * u, 2.6f * u, col, 255);
+        }
+        outline(c, cx - 6 * u, cy - 6 * u, 12 * u, 12 * u, 6 * u, 2.2f * u, col, 255);
+        outline(c, cx - 2.4f * u, cy - 2.4f * u, 4.8f * u, 4.8f * u, 2.4f * u, 1.6f * u, col, 255);
+        break;
+    }
+#undef P
+}
+
+static int tab_icon(const TsHud *h, int i) {
+    if (h->page >= TS_PAGE_JOB) return i == 0 ? IC_CAR : IC_MAP;
+    static const int ic[TS_TABS] = {IC_CAR, IC_BUS, IC_MAP, IC_PERSON, IC_BAG, IC_GEAR};
+    return i >= 0 && i < TS_TABS ? ic[i] : IC_CAR;
+}
+
+/* the head: logo, name, the car under it; the company funds in a glass pill on the right */
+static float head2(Ctx *c, const TsHud *h, float x0, float y, float cw) {
+    const Theme *t = c->t;
+    logo(c, x0, y, 38);
+    float mw = 0;
+    if (h->money[0]) {
+        float m1 = measure(c, h->money, 15.5f, 800), m2 = measure(c, h->money_label, 9.5f, 600);
+        mw = (m1 > m2 ? m1 : m2) + 24;
+        glass(c, x0 + cw - mw, y - 1, mw, 40, 20);
+        text(c, h->money, x0 + cw - mw, y + 2, mw, 20, 15.5f, 800, t->text, TS_TEXT_CENTER);
+        text(c, h->money_label, x0 + cw - mw, y + 21, mw, 14, 9.5f, 600, t->dim, TS_TEXT_CENTER);
+    }
+    float nw = cw - 48 - mw - 6;
+    text(c, "Horizon Transit", x0 + 46, y + 1, nw + 2, 22, 15.5f, 800, t->text, TS_TEXT_LEFT);
+    dot(c, x0 + 52, y + 29, 3.2f, 0x2FD27A);
+    text(c, h->head_sub[0] ? h->head_sub : h->line2, x0 + 60, y + 21, nw - 12, 16, 11.5f, 500, t->dim, TS_TEXT_LEFT);
+    return 50;
+}
+
+/* the floating tab bar: glass, the open tab under a glossy pill, an icon over each name */
+static void tab_bar(Ctx *c, const TsHud *h, float x0, float y, float cw, float bh) {
+    const Theme *t = c->t;
+    int n = h->tab_count > 0 ? (h->tab_count < 8 ? h->tab_count : 8) : 1;
+    ts_tab_rect_px[0] = (int)floorf(x0 * c->s), ts_tab_rect_px[1] = (int)floorf(y * c->s);
+    ts_tab_rect_px[2] = (int)ceilf((x0 + cw) * c->s), ts_tab_rect_px[3] = (int)ceilf((y + bh) * c->s);
+    glass(c, x0, y, cw, bh, bh * 0.5f);
+    float tw = (cw - 10) / n;
+    float pos = h->tab_slide > 0.0f ? clampf(h->tab_slide - 1.0f, 0.0f, (float)(n - 1)) : (float)h->tab;
+    /* 0.13: a rounded box as wide as the tab (it used to be a circle taller than the tab, poking out of the bar) */
+    if (pos >= 0.0f) glossy(c, x0 + 6 + pos * tw, y + 6, tw - 2, bh - 12, fminf(tw - 2, bh - 12) * 0.38f);
+    int lit = (int)(pos + 0.5f);
+    float isz = bh > 50 ? 19 : 16, lsz = n > 5 ? 9.5f : 10.5f;
+    for (int i = 0; i < n; ++i) {
+        uint32_t col = i == lit ? t->sel_text : t->dim;
+        float tx = x0 + 5 + i * tw;
+        icon(c, tab_icon(h, i), tx + tw / 2, y + bh * 0.38f, isz, col);
+        float sz = lsz; /* 0.13: a long name ("Optionen" in bold) gets smaller instead of leaving its box */
+        while (sz > 7.5f && measure(c, h->tabs[i], sz, i == lit ? 700 : 600) > tw - 8) sz -= 0.5f;
+        text(c, h->tabs[i], tx, y + bh * 0.6f, tw, bh * 0.3f, sz, i == lit ? 700 : 600, col, TS_TEXT_CENTER);
+    }
+}
+
+typedef struct {
+    float one, gap, title, tile, go, two, pill, btn, hero;
+} Metrics;
+static const Metrics M_ROOMY = {44, 7, 38, 58, 80, 64, 42, 44, 100};
+static const Metrics M_DENSE = {38, 5, 30, 50, 66, 54, 34, 38, 86};
+
+static int is_switch(const char *v, int *on) {
+    if (!strcmp(v, "An") || !strcmp(v, "Ein") || !strcmp(v, "On")) return *on = 1, 1;
+    if (!strcmp(v, "Aus") || !strcmp(v, "Off")) return *on = 0, 1;
+    return 0;
+}
+
+static void switch2(Ctx *c, float x, float y, int on) {
+    const Theme *t = c->t;
+    if (on) {
+        box(c, x, y, 42, 24, 12, t->accent, t->accent2, 0, 255);
+        box_fade(c, x, y, 42, 24, 12, 0xFFFFFF, 60, 0, 0.6f);
+        dot(c, x + 30, y + 12, 9, t->sel_text);
+    } else {
+        box(c, x, y, 42, 24, 12, t->card, t->card, 1, 255);
+        outline(c, x, y, 42, 24, 12, 2, t->dim, 200);
+        dot(c, x + 12, y + 12, 6, t->dim);
+    }
+}
+
+/* the chosen card: its rim and a light wash in the app's colour */
+static void chosen(Ctx *c, float x, float y, float w, float h, float r) {
+    const Theme *t = c->t;
+    glass(c, x, y, w, h, r);
+    box(c, x, y, w, h, r, t->accent, t->accent2, 0, theme_light(t) ? 26 : 40);
+    outline(c, x, y, w, h, r, 2.0f, t->accent, 255);
+}
+
+static void chip(Ctx *c, const char *s, float x1, float y, float maxw, int hot) {
+    const Theme *t = c->t;
+    if (!s || !s[0]) return;
+    float w = measure(c, s, 11, 700) + 20;
+    if (w > maxw) w = maxw;
+    if (hot) box(c, x1 - w, y, w, 22, 11, t->accent, t->accent2, 0, 255);
+    else glass(c, x1 - w, y, w, 22, 11);
+    text(c, s, x1 - w + 6, y, w - 12, 22, 11, 700, hot ? t->sel_text : t->dim, TS_TEXT_CENTER);
+}
+
+static int short_pair(Ctx *c, const TsHud *h, int r, float half) {
+    return h->row_heading[r] == 0 && h->row_value[r][0] && !(r < 9 && (h->row_meter_on >> r & 1u)) && strlen(h->row_value[r]) <= 16 &&
+           measure(c, h->row_label[r], 11, 600) < half - 22 && measure(c, h->row_value[r], 17, 800) < half - 22;
+}
+
+/* the page: returns the y after it */
+static float page2(Ctx *c, const TsHud *h, float x0, float y, float cw, const Metrics *m) {
+    const Theme *t = c->t;
+    float x1 = x0 + cw;
+    int first = h->row_count > 0 && h->row_heading[0] == 1 ? 1 : 0;
+    int job = h->page >= TS_PAGE_JOB;
+    int i = first;
+    /* the title (or, on the job, the sheet) */
+    if (job && h->page == TS_PAGE_JOB) {
+        float hh = m->hero;
+        glass(c, x0, y, cw, hh, 24);
+        box_fade(c, x0, y, cw, hh, 24, t->accent, 60, 0, 0.9f);
+        fill(c, x0 + cw / 2 - 18, y + 7, 36, 4, 2, t->dim);
+        float sw = 0;
+        if (h->speed_now >= 0) {
+            char sp[16];
+            snprintf(sp, sizeof(sp), "%d", h->speed_now);
+            sw = measure(c, sp, 40, 800) + 6;
+            float uw = measure(c, h->speed_unit, 10, 700) + 2;
+            text(c, sp, x1 - 14 - uw - sw, y + 16, sw, 46, 40, 800, t->text, TS_TEXT_RIGHT);
+            text(c, h->speed_unit, x1 - 12 - uw, y + 44, uw, 14, 10, 700, t->dim, TS_TEXT_LEFT);
+            sw += uw + 8;
+        }
+        const char *lab = h->trip_on ? h->trip_label : h->tabs[0];
+        const char *to = h->trip_on ? h->trip_to : (first < h->row_count ? h->row_label[first] : "");
+        text(c, lab, x0 + 16, y + 18, cw - 32 - sw, 16, 11, 700, t->accent, TS_TEXT_LEFT);
+        text(c, to, x0 + 16, y + 34, cw - 32 - sw, 24, 17, 800, t->text, TS_TEXT_LEFT);
+        if (h->trip_on && first < h->row_count && h->row_heading[first] == 2)
+            text(c, h->row_label[first], x0 + 16, y + 57, cw - 32 - sw, 16, 11, 500, t->dim, TS_TEXT_LEFT);
+        float p = clampf(h->trip_on ? h->trip_progress : 0, 0, 1), by = y + hh - 16;
+        fill(c, x0 + 16, by, cw - 32, 6, 3, mix(t->card_line, t->dim, 0.3f));
+        if (p > 0.0f) box(c, x0 + 16, by, (cw - 32) * p < 6 ? 6 : (cw - 32) * p, 6, 3, t->accent, t->accent2, 0, 255);
+        y += hh + m->gap + 2;
+        if (first < h->row_count && h->row_heading[first] == 2) ++i;
+    } else if (!job && h->page != TS_PAGE_MAP) {
+        const char *title = h->tab >= 0 && h->tab < h->tab_count ? h->tabs[h->tab] : "";
+        float tw = measure(c, title, 22, 800) + 8;
+        text(c, title, x0 + 2, y + 2, tw, 30, 22, 800, t->text, TS_TEXT_LEFT);
+        if (first < h->row_count && h->row_heading[first] == 2) {
+            const char *cv = h->row_value[first][0] ? h->row_value[first] : h->page == TS_PAGE_RIDES ? "" : h->row_label[first];
+            chip(c, cv, x1 - 2, y + 7, cw - tw - 12, strstr(cv, "\xC3\x97") != NULL); /* a hotspot's "1,3×" in colour */
+            ++i;
+        }
+        y += m->title;
+    }
+    int last_row = h->row_count - 1;
+    while (i < h->row_count) {
+        int r = i;
+        /* a heading inside the list */
+        if (h->row_heading[r] == 1 || (h->row_heading[r] == 2 && h->page != TS_PAGE_BUS && h->page != TS_PAGE_RIDES)) {
+            text(c, h->row_label[r], x0 + 4, y, cw * 0.6f, 22, 12.5f, 700, t->dim, TS_TEXT_LEFT);
+            if (h->row_value[r][0]) text(c, h->row_value[r], x0 + cw * 0.6f, y, cw * 0.4f - 4, 22, 12.5f, 600, t->dim, TS_TEXT_RIGHT);
+            y += 26;
+            ++i;
+            continue;
+        }
+        int sel = r == h->row_selected;
+        int sub = (r + 1 < h->row_count && h->row_heading[r + 1] == 2 && h->row_heading[r] == 0 && h->page == TS_PAGE_RIDES) ? r + 1 : -1;
+        if (sub >= 0 && sub == h->row_selected) sel = 1;
+        int sw_on = 0;
+        /* the shift: a GO card */
+        if (r == h->go_row && !job) {
+            float gh = m->go;
+            if (sel) chosen(c, x0, y, cw, gh, 26);
+            else glass(c, x0, y, cw, gh, 26);
+            float d = gh - 22;
+            float bx = x1 - 12 - d, byy = y + 11;
+            if (h->go_on) {
+                glass(c, bx, byy, d, d, d / 2);
+                outline(c, bx, byy, d, d, d / 2, 2, t->accent, 255);
+                text(c, pick(h->german, "Ende", "End"), bx, byy, d, d, 14, 800, t->text, TS_TEXT_CENTER);
+            } else {
+                dot(c, bx + d / 2, byy + d / 2, d / 2 + 4, mix(t->accent, t->bottom, 0.55f));
+                glossy(c, bx, byy, d, d, d / 2);
+                text(c, "GO", bx, byy, d, d, d * 0.32f, 900, t->sel_text, TS_TEXT_CENTER);
+            }
+            text(c, h->go_title, x0 + 16, y + 12, cw - d - 40, 26, 19, 800, t->text, TS_TEXT_LEFT);
+            text(c, h->go_text, x0 + 16, y + 38, cw - d - 40, 18, 11.5f, 500, t->dim, TS_TEXT_LEFT);
+            y += gh + m->gap + 2;
+            ++i;
+            continue;
+        }
+        /* a button: an entry without a value (the job's cancel too) */
+        if (h->row_heading[r] == 0 && (!h->row_value[r][0] || (job && r == last_row))) {
+            float bh = m->btn;
+            int red = job && r == last_row;
+            if (red) box(c, x0, y, cw, bh, bh / 2, sel ? 0xFF4D5E : mix(0xFF4D5E, t->bottom, 0.6f), sel ? 0xFF6A4D : mix(0xFF4D5E, t->bottom, 0.6f), 0, 255);
+            else if (sel) glossy(c, x0, y, cw, bh, bh / 2);
+            else glass(c, x0, y, cw, bh, bh / 2);
+            if (red || sel) box_fade(c, x0, y, cw, bh, bh / 2, 0xFFFFFF, 60, 0, 0.6f);
+            uint32_t tc = red ? 0xFFFFFF : sel ? t->sel_text : t->accent;
+            if (h->row_value[r][0]) {
+                text(c, h->row_label[r], x0 + 18, y, cw * 0.6f - 18, bh, 15, 800, tc, TS_TEXT_LEFT);
+                text(c, h->row_value[r], x0 + cw * 0.6f, y, cw * 0.4f - 18, bh, 12, 700, tc, TS_TEXT_RIGHT);
+            } else text(c, h->row_label[r], x0 + 18, y, cw - 36, bh, 15, 800, tc, TS_TEXT_CENTER);
+            y += bh + m->gap;
+            ++i;
+            continue;
+        }
+        /* two short numbers side by side: tiles */
+        float half = (cw - m->gap) / 2;
+        if ((h->page == TS_PAGE_ACCOUNT || job) && short_pair(c, h, r, half) && r + 1 < h->row_count && short_pair(c, h, r + 1, half) &&
+            r + 1 != last_row) {
+            for (int k = 0; k < 2; ++k) {
+                int rr = r + k;
+                float tx = x0 + k * (half + m->gap);
+                if (rr == h->row_selected) chosen(c, tx, y, half, m->tile, 20);
+                else glass(c, tx, y, half, m->tile, 20);
+                text(c, h->row_label[rr], tx + 12, y + 7, half - 24, 16, 11, 600, t->dim, TS_TEXT_LEFT);
+                text(c, h->row_value[rr], tx + 12, y + m->tile - 32, half - 24, 26, 17, 800, t->text, TS_TEXT_LEFT);
+            }
+            y += m->tile + m->gap;
+            i += 2;
+            continue;
+        }
+        if (sub >= 0) { /* a ride request: where to and the pay big, who under it; chosen, a pill to take it */
+            char v1[48], v2[48];
+            snprintf(v1, sizeof(v1), "%s", h->row_value[r]);
+            v2[0] = 0;
+            char *dt = strstr(v1, " · ");
+            if (dt) {
+                snprintf(v2, sizeof(v2), "%.*s", (int)(dt - v1), v1);
+                memmove(v1, dt + strlen(" · "), strlen(dt + strlen(" · ")) + 1);
+            }
+            char sb[112];
+            if (h->row_value[sub][0]) snprintf(sb, sizeof(sb), "%s · %s", h->row_label[sub], h->row_value[sub]);
+            else snprintf(sb, sizeof(sb), "%s", h->row_label[sub]);
+            float ch = m->two + (sel ? m->pill + 8 : 0);
+            if (sel) chosen(c, x0, y, cw, ch, 24);
+            else glass(c, x0, y, cw, ch, 24);
+            float pw = measure(c, v1, 19, 800) + 4, kw = measure(c, v2, 11.5f, 600) + 4;
+            if (pw > cw * 0.45f) pw = cw * 0.45f;
+            if (kw > cw * 0.35f) kw = cw * 0.35f;
+            float mid = m->two * 0.5f;
+            text(c, h->row_label[r], x0 + 14, y + mid - 22, cw - 40 - pw, 22, 15, 800, t->text, TS_TEXT_LEFT);
+            text(c, v1, x1 - 14 - pw, y + mid - 24, pw, 26, 19, 800, t->value, TS_TEXT_RIGHT);
+            text(c, sb, x0 + 14, y + mid + 2, cw - 40 - kw, 18, 11.5f, 500, t->dim, TS_TEXT_LEFT);
+            if (v2[0]) text(c, v2, x1 - 14 - kw, y + mid + 2, kw, 18, 11.5f, 700, t->text, TS_TEXT_RIGHT);
+            if (sel) {
+                float py = y + m->two;
+                glossy(c, x0 + 10, py, cw - 20, m->pill, m->pill / 2);
+                text(c, pick(h->german, "Fahrt annehmen", "Accept ride"), x0 + 26, py, cw * 0.6f, m->pill, 14, 800, t->sel_text, TS_TEXT_LEFT);
+                char pr[56];
+                snprintf(pr, sizeof(pr), "%s  \xE2\x86\x92", v1);
+                text(c, pr, x0 + cw * 0.5f, py, cw * 0.5f - 26, m->pill, 13.5f, 800, t->sel_text, TS_TEXT_RIGHT);
+            }
+            y += ch + m->gap;
+            i += 2;
+            continue;
+        }
+        /* one entry: name left, value (or a switch) right */
+        {
+            float ch = m->one;
+            int dis = h->row_heading[r] == 2;
+            if (sel) chosen(c, x0, y, cw, ch, 20);
+            else glass(c, x0, y, cw, ch, 20);
+            float inner = cw - 28;
+            int isw = is_switch(h->row_value[r], &sw_on);
+            float vw = isw ? 46 : measure(c, h->row_value[r], 13.5f, 800) + 4;
+            if (vw <= 4) vw = 0;
+            if (vw > inner * 0.5f) vw = inner * 0.5f;
+            float ty = r < 9 && (h->row_meter_on >> r & 1u) ? -3 : 0;
+            text(c, h->row_label[r], x0 + 14, y + ty, inner - vw - 8, ch, 14, 700, dis ? t->dim : t->text, TS_TEXT_LEFT);
+            if (isw) switch2(c, x1 - 14 - 42, y + (ch - 24) / 2, sw_on);
+            else if (vw > 0) text(c, h->row_value[r], x1 - 14 - vw, y + ty, vw, ch, 13.5f, 800, sel ? t->text : dis ? t->dim : t->value, TS_TEXT_RIGHT);
+            if (r < 9 && (h->row_meter_on >> r & 1u)) {
+                float mv = h->row_meter[r], mw = cw - 28, my = y + ch - 9;
+                uint32_t col = !(h->row_meter_quality >> r & 1u) ? t->accent : mv >= 0.7f ? 0x2FD27A : mv >= 0.4f ? 0xFFC83D : 0xFF4D4D;
+                fill(c, x0 + 14, my, mw, 4, 2, mix(t->card_line, t->dim, 0.25f));
+                if (mv > 0.0f) fill(c, x0 + 14, my, mw * mv < 4 ? 4 : mw * mv, 4, 2, col);
+            }
+            y += ch + m->gap;
+            ++i;
+        }
+    }
+    return y;
+}
+
+/* draws the page, roomy if it fits, else closer together; returns the y after it */
+static float page_fit(Ctx *c, const TsHud *h, float x0, float y, float cw, float bottom) {
+    Ctx dry = *c;
+    dry.dry = 1;
+    const Metrics *m = page2(&dry, h, x0, y, cw, &M_ROOMY) <= bottom ? &M_ROOMY : &M_DENSE;
+    return page2(c, h, x0, y, cw, m);
+}
+
 void ts_device_draw(const TsHud *h, int device, int theme, float scale, const char *clock, TsPhoneCanvas *cv) {
     Ctx c = {.cv = cv, .s = scale, .t = &themes[theme >= 0 && theme < TS_THEMES ? theme : 0]};
     const Theme *t = c.t;
@@ -926,20 +1257,18 @@ void ts_device_draw(const TsHud *h, int device, int theme, float scale, const ch
         fill(&c, bx + 2, sy0 + 11, 17, 8, 2.5f, t->text);
         box(&c, bx + 26, sy0 + 13, 2.2f, 4.5f, 1, t->text, t->text, 1, 140);
         float x0 = sx0 + 18, x1 = sx1 - 18, y = sy0 + 34;
-        /* the app's bar: logo and name on the left, the tabs on the right */
-        float head_w = 250;
-        app_head(&c, h, x0, y, head_w);
-        float tabs_x = x0 + head_w + 12;
-        app_tabs(&c, h, tabs_x, y + 4, x1 - tabs_x);
+        /* 0.12: the head over the list's width, the tab bar on the right */
+        float lw = 330, rx = x0 + lw + 16, rw = x1 - rx;
+        head2(&c, h, x0, y, lw);
+        tab_bar(&c, h, rx, y - 4, rw, 48);
         y += 56;
         /* left: the list, right: the details, the footer and the keys */
-        float lw = 330, rx = x0 + lw + 16, rw = x1 - rx;
-        app_entries(&c, h, x0, y, lw);
+        page_fit(&c, h, x0, y, lw, sy1 - 16);
         float foot_h = h->footer[0] ? 56 : 0;
         if (h->map_on) map_box(&c, h, rx, y, rw, sy1 - 40 - foot_h - (foot_h > 0 ? 8 : 0) - y, 16); /* 0.7 */
         else detail_column(&c, h, rx, y, rw, sy1 - 40 - foot_h - (foot_h > 0 ? 8 : 0));
         if (h->footer[0]) {
-            box(&c, rx, sy1 - 40 - foot_h, rw, foot_h, 12, t->seg, t->seg, 1, t->seg_alpha / 2 + 10);
+            glass(&c, rx, sy1 - 40 - foot_h, rw, foot_h, 16);
             text_wrap(&c, h->footer, rx + 10, sy1 - 40 - foot_h + 7, rw - 20, foot_h - 12, 12.5f, t->dim);
         }
         text(&c, keys_text(h), rx, sy1 - 36, rw, 20, 12, 600, t->dim, TS_TEXT_CENTER);
@@ -967,30 +1296,29 @@ void ts_device_draw(const TsHud *h, int device, int theme, float scale, const ch
 
     float pad = device == TS_DEVICE_EDGE ? 14 : 16;
     float x0 = sx0 + pad, x1 = sx1 - pad, cw = x1 - x0;
-    float y = sy0 + (device == TS_DEVICE_EDGE ? 44 : 54);
-    y += app_head(&c, h, x0, y, cw);
-    y += app_tabs(&c, h, x0, y, cw);
+    float y = sy0 + (device == TS_DEVICE_EDGE ? 44 : 52);
+    y += head2(&c, h, x0, y, cw) + 4;
     float bottom = sy1 - (device == TS_DEVICE_EDGE ? 22 : 0);
+    /* 0.12: the floating tab bar at the bottom, the keys over it, the footer over them if there is room */
+    float bar_h = 54, bar_y = bottom - 20 - bar_h, keys_y = bar_y - 19, list_end = keys_y - 4;
     if (h->map_on) { /* 0.7: the map takes what the rows leave */
         Ctx dry = c;
         dry.dry = 1;
-        float rows_h = app_entries(&dry, h, x0, 0, cw);
-        float mh = bottom - 56 - (h->footer[0] ? 56 : 0) - y - rows_h - 4;
+        float rows_h = page2(&dry, h, x0, 0, cw, &M_DENSE);
+        float mh = list_end - y - rows_h - 6;
         if (mh > 40) {
-            map_box(&c, h, x0, y, cw, mh, 16);
-            y += mh + 10;
+            map_box(&c, h, x0, y, cw, mh, 22);
+            y += mh + 8;
         }
+        y = page2(&c, h, x0, y, cw, &M_DENSE);
+    } else y = page_fit(&c, h, x0, y, cw, list_end - (h->footer[0] ? 50 : 0));
+    if (h->footer[0] && y + 46 <= list_end) {
+        float fy = list_end - 46;
+        glass(&c, x0, fy, cw, 44, 18);
+        text_wrap(&c, h->footer, x0 + 12, fy + 4, cw - 24, 36, 11.5f, t->dim);
     }
-    y = app_entries(&c, h, x0, y, cw);
-
-    /* footer, the keys; the home bar (phone) or Android's three keys (Edge) */
-    float fy = y + 2;
-    if (fy < bottom - 112) fy = bottom - 112;
-    if (h->footer[0]) {
-        box(&c, x0, fy, cw, 50, 12, t->seg, t->seg, 1, t->seg_alpha / 2 + 10);
-        text_wrap(&c, h->footer, x0 + 10, fy + 6, cw - 20, 40, 12, t->dim);
-    }
-    text(&c, keys_text(h), x0, bottom - 50, cw, 20, 12, 600, t->dim, TS_TEXT_CENTER);
+    text(&c, keys_text(h), x0, keys_y, cw, 16, 11, 600, t->dim, TS_TEXT_CENTER);
+    tab_bar(&c, h, x0 - 4, bar_y, cw + 8, bar_h);
     if (device == TS_DEVICE_EDGE) {
         float ny = sy1 - 26, mid = X + b->w / 2;
         /* recent apps (three bars), home (a ring), back (a chevron) */
@@ -1314,7 +1642,7 @@ static void dash_card(Ctx *c, const Glass *g, const TsHud *h) {
         int shown = (int)((float)k->money * ease_out((a - 0.15f) / 1.0f) + 0.5f);
         if (shown != k->money) shown = shown / 5 * 5;
         char m[24];
-        snprintf(m, sizeof(m), k->kind == TS_CARD_RIDE ? "+%d €" : "%d €", shown);
+        snprintf(m, sizeof(m), "%s%s", k->kind == TS_CARD_RIDE ? "+" : "", ts_cr(h->german, shown));
         text(c, m, x + DS_W - pad - 120, y + 10, 120, 34, 25, 700, g->good, TS_TEXT_RIGHT);
     }
     if (k->kind == TS_CARD_SHIFT && k->tier >= 0) medal(c, x + DS_W - pad - 12, y + 63, 12, k->tier);
@@ -1446,7 +1774,7 @@ void ts_dash_draw(const TsHud *h, int theme, float scale, TsPhoneCanvas *cv) {
     float mw = 0;
     if (h->meter >= 0) {
         char m[32];
-        snprintf(m, sizeof(m), "%d €", h->meter);
+        snprintf(m, sizeof(m), "%s", ts_cr(h->german, h->meter));
         float lw = measure(&c, h->meter_label, 9.5f, 700) + 6, vw = measure(&c, m, 14, 700) + 4;
         mw = lw + vw;
         text(&c, h->meter_label, x + DS_W - 20 - mw, by + 5, lw, 14, 9.5f, 700, g.dim, TS_TEXT_LEFT);
