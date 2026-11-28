@@ -1,6 +1,6 @@
 # Horizon Transit
 
-**Your festival. Your route.** · *Dein Festival. Deine Route.*
+**Your festival. Your route.**
 
 A ride-hailing and bus-line mod for **Forza Horizon 2 on PC**: take Uber-style rides and drive bus lines with virtual passengers who talk, remember you and rate your driving. Everything runs from a phone on the left of the screen (**F9**) or from the **Android app** on your real phone. You earn **real in-game credits**.
 One mod, one file (`TransportSim.dll`), for the [FH2 Mod Platform](https://github.com/Trinculo54/fh2-mod-platform). Texts in English and German.
